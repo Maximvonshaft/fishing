@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-Hans" class="h-full" data-theme="ink-amber">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="color-scheme" content="dark"/>
+  <meta name="theme-color" content="#0b0e11"/>
+  <title>你的名字 — 清晰为先 · 未来极简</title>
+
+  <!-- Perf hints -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://images.unsplash.com" crossorigin>
+  <link rel="dns-prefetch" href="https://threejs.org">
+  <link rel="preload" as="image" href="https://threejs.org/examples/textures/planets/earth_atmos_1024.jpg" imagesrcset="https://threejs.org/examples/textures/planets/earth_atmos_1024.jpg 1024w, https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg 2048w" imagesizes="(max-width: 768px) 60vw, 30vw">
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config={darkMode:'class',theme:{container:{center:true,padding:'1rem'},extend:{fontFamily:{display:['Inter','ui-sans-serif','system-ui'],sans:['Inter','ui-sans-serif','system-ui']}}}};</script>
+
+  <!-- Vector Map (lazy injected) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap/dist/css/jsvectormap.min.css">
+
+  <style>
+    /* ===== Theme ===== */
+    :root{ --radius:1rem; --sidebar-w:300px; --text-1:0 0% 100%; --text-2:0 0% 78%; }
+    html[data-theme="ink-amber"]{
+      --bg0: 210 15% 4%; --bg1:210 15% 7%;
+      --bgGlow1: 38 100% 12%/.22; --bgGlow2: 14 100% 10%/.16;
+      --acc1: 38 100% 60%; --acc2: 14 100% 62%;
+      --ring: 38 100% 60%;
+      --hud: 38 100% 75%; --porthole: 45 100% 55%;
+      --star-cool: 210 18% 90%; --star-warm: 38 100% 68%;
+    }
+
+    html,body{height:100%}
+    html{scroll-behavior:smooth}
+    body{
+      background:
+        radial-gradient(1200px 700px at 20% 12%, hsl(var(--bgGlow1)), transparent 60%),
+        radial-gradient(900px 600px at 80% 22%,  hsl(var(--bgGlow2)), transparent 60%),
+        linear-gradient(180deg, hsl(var(--bg0)), hsl(var(--bg1)));
+      color:hsl(var(--text-1)); font-family:Inter,ui-sans-serif,system-ui; letter-spacing:.01em;
+    }
+    h1,h2,h3,.font-display{font-weight:800;letter-spacing:.02em}
+    .gradient-text{background:linear-gradient(120deg,hsl(var(--acc1)) 0%,hsl(var(--acc2)) 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .divider{height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.18),transparent)}
+
+    /* Canvases / Layers */
+    #universe{position:fixed;inset:0;z-index:0;pointer-events:none}
+    #globe{position:fixed;inset:0;z-index:1;pointer-events:none}
+    #globe2d{position:fixed;inset:0;z-index:1;pointer-events:none;display:grid;place-items:center}
+
+    /* 2D Globe (mobile-first) */
+    .g2d-wrap{position:relative;width:min(68vw,520px);aspect-ratio:1/1;transform:translate(10%,10%)}
+    .g2d-sphere{position:absolute;inset:auto 0 0 auto;right:6%;bottom:4%;width:100%;aspect-ratio:1/1;border-radius:9999px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.08) inset;mask-image:radial-gradient(circle at 50% 50%, #000 68%, transparent 71%)}
+    .g2d-tex{position:absolute;inset:0;background-image:url('https://threejs.org/examples/textures/planets/earth_atmos_1024.jpg');background-size:200% 100%;background-position:0% 50%;filter:brightness(1.05) contrast(1.02) saturate(1.02)}
+    .g2d-shade{position:absolute;inset:0;background:radial-gradient(120% 120% at 30% 30%, rgba(0,0,0,0) 60%, rgba(0,0,0,.55) 100%)}
+    .g2d-atmo{position:absolute;inset:-3% -3% -3% -3%;border-radius:9999px;box-shadow:0 0 80px rgba(111,184,255,.16) inset}
+    @keyframes g2d-spin{from{background-position:0% 50%}to{background-position:100% 50%}}
+    .g2d-tex{animation:g2d-spin 120s linear infinite}
+
+    /* Hide 2D globe on large screens if 3D present */
+    @media (min-width:1024px){ #globe2d{display:none} }
+
+    /* Layout */
+    .layout{display:grid;grid-template-columns:var(--sidebar-w) 1fr}
+    @media (max-width:1024px){.layout{grid-template-columns:1fr}}
+
+    /* Sidebar */
+    #sidebar{position:sticky;top:0;align-self:start;height:100svh;z-index:10;width:var(--sidebar-w);border-right:1px solid hsl(0 0% 100%/.06);background:linear-gradient(180deg,hsl(0 0% 0%/.42),hsl(0 0% 0%/.30));backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);display:flex;flex-direction:column}
+    @media (max-width:1024px){#sidebar{display:none}}
+    .brand{display:flex;align-items:center;gap:.9rem;padding:1rem;border-bottom:1px solid hsl(0 0% 100%/.06)}
+    .logo-slot{width:56px;height:56px;border-radius:14px;display:grid;place-items:center;font-weight:900;font-size:.85rem;letter-spacing:.08em;background:linear-gradient(180deg,hsl(var(--acc1)/.35),hsl(var(--acc2)/.25));box-shadow:0 0 0 2px hsl(var(--acc1)/.45),0 10px 26px rgba(0,0,0,.6);color:#fff}
+    .side-intro{padding:.75rem 1rem 1rem;font-size:.9rem;color:hsl(var(--text-2))}
+    .nav{padding:.6rem;position:relative}
+    #active-rail{position:absolute;left:6px;width:3px;height:28px;border-radius:3px;background:linear-gradient(180deg,hsl(var(--acc1)/.95),hsl(var(--acc2)/.95));box-shadow:0 0 14px hsl(var(--acc1)/.55);transform:translateY(8px);transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+    .nav a{display:flex;align-items:center;gap:.6rem;padding:.66rem .8rem .66rem 1rem;margin:.2rem 0;border-radius:.75rem;font-weight:700;font-size:.95rem;color:hsl(var(--text-2));border:1px solid transparent}
+    .nav a:hover,.nav a:focus-visible{background:hsl(0 0% 100%/.06);color:hsl(var(--text-1))}
+    .nav a.active{background:hsl(0 0% 100%/.08);color:hsl(var(--text-1));border-color:hsl(0 0% 100%/.12);box-shadow:0 0 0 1px hsl(0 0% 100%/.03) inset,0 0 0 2px hsl(var(--acc1)/.18) inset}
+    .side-footer{margin-top:auto;padding:1rem;font-size:.8rem;color:hsl(var(--text-2))}
+
+    /* Buttons / Cards */
+    .btn{border-radius:9999px;padding:.6rem 1rem;font-weight:800;letter-spacing:.02em;color:#fff;background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.04));border:1px solid rgba(255,255,255,.22);box-shadow:0 8px 22px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.06);transition:transform .12s ease, box-shadow .2s ease, border-color .2s ease}
+    .btn:hover,.btn:focus-visible{border-color:hsl(var(--acc1)/.55);box-shadow:inset 0 0 0 1px hsl(var(--acc1)/.25),0 10px 26px rgba(0,0,0,.65);transform:translateY(-1px)}
+    .glass{position:relative;border-radius:var(--radius);background:hsl(220 10% 12%/.38);border:1px solid hsl(0 0% 100%/.18);backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);box-shadow:0 24px 60px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.06)}
+    .glass-strong{background:hsl(220 10% 12%/.54)}
+
+    /* Mobile nav */
+    #mobile-bar{position:fixed;left:0;right:0;bottom:max(12px, env(safe-area-inset-bottom));z-index:40;display:flex;justify-content:center}
+    #mobile-bar .wrap{display:flex;gap:.2rem;padding:.35rem;border-radius:9999px;background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(14px) saturate(160%);-webkit-backdrop-filter:blur(14px) saturate(160%);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+    #mobile-bar a{display:flex;flex-direction:column;align-items:center;gap:.15rem;padding:.45rem .8rem;border-radius:9999px;color:hsl(var(--text-2));font-size:11px;font-weight:700}
+    #mobile-bar a.active,#mobile-bar a:hover,#mobile-bar a:focus-visible{color:#fff;background:rgba(255,255,255,.08)}
+    @media (min-width:1024px){#mobile-bar{display:none}}
+    @media (max-width:1024px){main{padding-bottom:90px}}
+
+    /* Sci-Fi Cursor (desktop) */
+    @media (pointer:fine){
+      body.custom-cursor{cursor:none}
+      #cursor-ring,#cursor-dot,#cursor-ripple{position:fixed;left:0;top:0;transform:translate(-50%,-50%);pointer-events:none;z-index:10000;will-change:transform,opacity}
+      #cursor-ring{width:26px;height:26px;border:1.5px solid hsl(var(--ring));border-radius:9999px;mix-blend-mode:screen;transition:border-color .15s ease, transform .08s ease, opacity .2s ease;filter:drop-shadow(0 0 8px hsla(var(--ring)/.5))}
+      #cursor-dot{width:6px;height:6px;border-radius:9999px;background:#fff;box-shadow:0 0 10px rgba(255,255,255,.9);transition:transform .08s ease, opacity .2s ease}
+      #cursor-ring.active{border-color:hsl(var(--acc2));transform:translate(-50%,-50%) scale(1.18)}
+      #cursor-ripple{width:2px;height:2px;border-radius:9999px;background:hsl(var(--ring));opacity:0}
+    }
+
+    /* Control panel */
+    #control{position:fixed;right:14px;top:14px;z-index:50}
+    #control .card{background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(12px) saturate(140%);-webkit-backdrop-filter:blur(12px) saturate(140%);border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.45)}
+    #control select,#control input[type="checkbox"]{background:transparent;border:1px solid rgba(255,255,255,.22);border-radius:10px;padding:.35rem .5rem;font-size:12px}
+    #control label{font-size:12px;opacity:.85}
+
+    /* Opt-in 3D on mobile */
+    #opt3d{position:fixed;left:12px;top:12px;z-index:51}
+  </style>
+</head>
+<body class="h-full">
+  <!-- Backgrounds -->
+  <canvas id="universe" aria-hidden="true"></canvas>
+  <canvas id="globe" aria-hidden="true" class="hidden"></canvas>
+  <div id="globe2d" aria-hidden="true">
+    <div class="g2d-wrap">
+      <div class="g2d-sphere">
+        <div class="g2d-tex" role="presentation"></div>
+        <div class="g2d-shade" role="presentation"></div>
+        <div class="g2d-atmo" role="presentation"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Control panel -->
+  <div id="control" class="hidden md:block">
+    <div class="card p-3 text-xs text-white/90 flex items-center gap-2">
+      <label class="inline-flex items-center gap-1"><input id="fxToggle" type="checkbox" checked>动效</label>
+      <div class="w-px h-5 bg-white/20 mx-1"></div>
+      <label for="viewSel">视图</label>
+      <select id="viewSel">
+        <option value="capsule">舱窗</option>
+        <option value="capsule-horizon">舱窗 + 地平线</option>
+        <option value="space">纯宇宙</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Opt-in 3D for mobile/low-end -->
+  <div id="opt3d" class="md:hidden">
+    <button id="enable3d" class="btn text-xs">启用 3D 地球</button>
+  </div>
+
+  <!-- Mobile capsule nav -->
+  <nav id="mobile-bar" aria-label="底部导航">
+    <div class="wrap">
+      <a href="#home" data-id="home">概览</a>
+      <a href="#work" data-id="work">作品</a>
+      <a href="#about" data-id="about">关于</a>
+      <a href="#travel" data-id="travel">足迹</a>
+      <a href="#writing" data-id="writing">写作</a>
+      <a href="#contact" data-id="contact">联系</a>
+    </div>
+  </nav>
+
+  <div class="layout relative z-10">
+    <!-- Sidebar -->
+    <aside id="sidebar" role="navigation" aria-label="侧边栏">
+      <div class="brand">
+        <div class="logo-slot">LOGO</div>
+        <div>
+          <div class="font-display text-lg">你的品牌 / 名字</div>
+          <div class="text-xs opacity-80">Product · Visual · Interactions</div>
+        </div>
+      </div>
+      <div class="side-intro">未来极简 · 商务科幻。生成视觉 / 交互系统 / 设计工程。</div>
+      <nav class="nav">
+        <div id="active-rail"></div>
+        <a href="#home" class="active">概览</a>
+        <a href="#work">作品</a>
+        <a href="#about">关于</a>
+        <a href="#travel">足迹</a>
+        <a href="#writing">写作</a>
+        <a href="#contact">联系</a>
+      </nav>
+      <div class="side-footer">
+        <div class="flex gap-2">
+          <a href="mailto:hello@example.com" class="btn">邮件</a>
+          <a href="#contact" class="btn">联系</a>
+        </div>
+        <div class="mt-3 opacity-75">© <span id="year"></span> 你的名字</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="home">
+      <!-- HERO -->
+      <section data-warp-min="0.004" data-warp-max="0.010" class="container max-w-6xl grid md:grid-cols-2 gap-8 pt-14 md:pt-20 pb-12">
+        <div class="glass glass-strong p-6 md:p-8">
+          <p class="text-sm opacity-80">Portfolio</p>
+          <h1 class="mt-2 font-display text-4xl sm:text-5xl md:text-6xl leading-tight"><span class="gradient-text">清晰为先 · 商务科幻</span></h1>
+          <p class="mt-4 text-base sm:text-lg opacity-90 max-w-prose">未来极简、可读克制。交互 · 生成视觉 · 系统化设计。</p>
+          <div class="mt-6 flex flex-wrap items-center gap-3 text-sm">
+            <a href="#contact" class="btn">与我合作</a>
+            <a href="#work" class="btn">浏览作品</a>
+            <span id="localtime" class="opacity-70" aria-live="polite">—</span>
+          </div>
+          <div class="divider mt-6"></div>
+          <div class="mt-4 grid grid-cols-3 gap-3 text-xs opacity-80">
+            <div><div class="opacity-60">Based</div><div>Tokyo</div></div>
+            <div><div class="opacity-60">Focus</div><div>HCI · Generative</div></div>
+            <div><div class="opacity-60">Open</div><div>Collab / Freelance</div></div>
+          </div>
+        </div>
+        <div class="glass overflow-hidden p-6">
+          <h3 class="font-semibold mb-3">最新动态</h3>
+          <ul class="space-y-2 text-sm opacity-90">
+            <li>· 发布「语义构件 2.0」设计系统</li>
+            <li>· 生成式交互 R&D 进行中</li>
+            <li>· 接受驻地 / 合作：欢迎邮件</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- WORK -->
+      <section id="work" data-warp-min="0.010" data-warp-max="0.022" class="container max-w-6xl py-12 md:py-16">
+        <h2 class="font-display text-2xl sm:text-3xl gradient-text mb-6">精选作品</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <article class="glass p-3"><div class="h-56 rounded-lg overflow-hidden"><img loading="lazy" decoding="async" class="w-full h-full object-cover" src="https://images.unsplash.com/photo-1495567720989-cebdbdd97913?q=80&w=1200&auto=format&fit=crop" alt="夜色分形预览"/></div><div class="mt-3 flex items-center justify-between"><h3 class="font-semibold">夜色分形</h3><span class="text-xs opacity-70">GLSL</span></div></article>
+          <article class="glass p-3"><div class="h-56 rounded-lg overflow-hidden"><img loading="lazy" decoding="async" class="w-full h-full object-cover" src="https://images.unsplash.com/photo-1549880338-65ddcdfd017b?q=80&w=1200&auto=format&fit=crop" alt="风的形状预览"/></div><div class="mt-3 flex items-center justify-between"><h3 class="font-semibold">风的形状</h3><span class="text-xs opacity-70">Motion</span></div></article>
+          <article class="glass p-3"><div class="h-56 rounded-lg overflow-hidden"><img loading="lazy" decoding="async" class="w-full h-full object-cover" src="https://images.unsplash.com/photo-1517694712202-14dd9538aa97?q=80&w=1200&auto=format&fit=crop" alt="语义构件预览"/></div><div class="mt-3 flex items-center justify-between"><h3 class="font-semibold">语义构件</h3><span class="text-xs opacity-70">Design System</span></div></article>
+        </div>
+      </section>
+
+      <!-- ABOUT -->
+      <section id="about" data-warp-min="0.003" data-warp-max="0.007" class="container max-w-6xl py-12 md:py-16">
+        <div class="glass p-6 md:p-8">
+          <div class="grid md:grid-cols-3 gap-8 items-start">
+            <div class="md:col-span-1">
+              <div class="relative h-48 w-48 rounded-full overflow-hidden">
+                <img loading="lazy" decoding="async" alt="头像" class="h-full w-full object-cover" src="https://images.unsplash.com/photo-1527980965255-d3b416303d12?q=80&w=600&auto=format&fit=crop"/>
+              </div>
+            </div>
+            <div class="md:col-span-2">
+              <h2 class="font-display text-2xl sm:text-3xl gradient-text mb-3">关于我</h2>
+              <p class="leading-relaxed opacity-90 max-w-prose">跨学科创作者，专注人机交互、可视化与生成艺术。以系统化思维贯穿，平衡理性与诗意。</p>
+              <div class="divider my-5"></div>
+              <ul class="grid sm:grid-cols-2 gap-3 text-sm">
+                <li class="glass p-3">🏆 Awwwards SOTD（示例）</li>
+                <li class="glass p-3">🎨 Adobe Design Achievement（示例）</li>
+                <li class="glass p-3">💼 服务品牌：X / Y / Z</li>
+                <li class="glass p-3">🧪 研究方向：生成式交互</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TRAVEL -->
+      <section id="travel" data-warp-min="0.005" data-warp-max="0.015" class="container max-w-6xl py-12 md:py-16">
+        <h2 class="font-display text-2xl sm:text-3xl gradient-text mb-6">我的足迹</h2>
+        <div class="grid md:grid-cols-5 gap-4">
+          <div class="md:col-span-3 glass p-3">
+            <div id="worldmap" class="h-[420px] sm:h-[520px] rounded-lg overflow-hidden"></div>
+          </div>
+          <div class="md:col-span-2 glass p-4">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold">到访国家</h3>
+              <span class="text-xs opacity-70" id="travel-stats">—</span>
+            </div>
+            <div class="divider my-3"></div>
+            <div class="overflow-auto max-h-[520px]">
+              <table class="w-full text-sm" aria-describedby="travel-stats">
+                <thead class="text-xs opacity-70">
+                  <tr>
+                    <th class="text-left py-2 pr-2">#</th>
+                    <th class="text-left py-2 pr-2">国家/地区</th>
+                    <th class="text-left py-2 pr-2">城市</th>
+                    <th class="text-left py-2">最近时间</th>
+                  </tr>
+                </thead>
+                <tbody id="travel-table"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- WRITING -->
+      <section id="writing" data-warp-min="0.006" data-warp-max="0.012" class="container max-w-6xl py-12 md:py-16">
+        <h2 class="font-display text-2xl sm:text-3xl gradient-text mb-6">最近写作</h2>
+        <div class="grid md:grid-cols-2 gap-4">
+          <article class="glass p-5"><h3 class="font-semibold">界面中的留白作为节拍</h3><p class="text-sm opacity-80 mt-1">节拍感如何组织信息密度。</p><a class="mt-3 inline-flex items-center gap-1 underline underline-offset-4" href="#">阅读 →</a></article>
+          <article class="glass p-5"><h3 class="font-semibold">用生成算法雕刻光线</h3><p class="text-sm opacity-80 mt-1">从噪声函数到体积光的可视化探索。</p><a class="mt-3 inline-flex items-center gap-1 underline underline-offset-4" href="#">阅读 →</a></article>
+        </div>
+      </section>
+
+      <!-- CONTACT -->
+      <section id="contact" data-warp-min="0.002" data-warp-max="0.004" class="container max-w-6xl py-12 md:py-20">
+        <div class="glass p-8 md:p-12">
+          <h2 class="font-display text-2xl sm:text-3xl">让我们一起创造</h2>
+          <p class="mt-2 text-sm opacity-80 max-w-prose">邮件、社媒或表单皆可。如果你有项目、驻地计划或展览合作，欢迎抛来灵感。</p>
+          <div class="mt-6 flex flex-wrap gap-3 text-sm">
+            <a class="btn" href="mailto:hello@example.com">发邮件</a>
+            <a class="btn" href="https://x.com" target="_blank" rel="noreferrer noopener">X / Twitter</a>
+            <a class="btn" href="https://instagram.com" target="_blank" rel="noreferrer noopener">Instagram</a>
+            <a class="btn" href="#">表单</a>
+          </div>
+        </div>
+      </section>
+
+      <footer class="container max-w-6xl pb-12 pt-6 text-xs opacity-80">© <span id="footer-year"></span> 你的名字 · 可自由改造</footer>
+    </main>
+  </div>
+
+  <!-- Cursor nodes -->
+  <div id="cursor-ring"></div>
+  <div id="cursor-dot"></div>
+  <div id="cursor-ripple"></div>
+
+  <script>
+  // =====================
+  // App Core + Modules
+  // =====================
+  const $=(s,r=document)=>r.querySelector(s); const $$=(s,r=document)=>Array.from(r.querySelectorAll(s));
+  const clamp=(v,a,b)=>Math.min(b,Math.max(a,v)); const lerp=(a,b,t)=>a+(b-a)*t; const easeInOutCubic=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+
+  const Env={
+    get(){ const nav=navigator; const conn=nav.connection||{}; const isMobile= matchMedia('(max-width: 768px)').matches || /Mobi|Android|iPhone|iPad|iPod/i.test(nav.userAgent);
+      const reduced= matchMedia('(prefers-reduced-motion: reduce)').matches; const saveData= !!conn.saveData; const lowMem= (nav.deviceMemory||8) <= 4; const dpr= Math.min( (window.devicePixelRatio||1), isMobile?1.0:1.6 );
+      return { isMobile, reduced, saveData, lowMem, dpr, heavyOK: !reduced && !saveData && !lowMem && !isMobile } }
+  };
+
+  const App={ state:{motion:true, mode:'capsule', env:Env.get(), webgl:false, mapReady:false}, init(){
+    Core.initTime(); Core.initAnchors(); NavSpy.init(); Cursor.init();
+    Universe2D.init(); Globe2D.init(); TravelMap.observe(); Control.init();
+    document.addEventListener('visibilitychange',()=>{ if(document.hidden){ App.state.motion=false; } else { App.state.motion=$('#fxToggle')?$('#fxToggle').checked:true; Universe2D.restart(); if(App.state.webgl && window.Globe3D) Globe3D.restart(); } });
+    // Auto-upgrade to 3D if powerful enough
+    if(App.state.env.heavyOK){ loadThreeThenInit(); }
+    // Mobile parallax for 2D globe
+    addEventListener('mousemove',e=>Globe2D.parallax(e.clientX,e.clientY),{passive:true});
+    addEventListener('deviceorientation',e=>Globe2D.tilt(e.beta||0,e.gamma||0),{passive:true});
+  }};
+
+  const Core={ initTime(){ const y=new Date().getFullYear(); $('#year').textContent=String(y); $('#footer-year').textContent=String(y); const fmt=new Intl.DateTimeFormat('zh-Hans',{timeZone:'Asia/Tokyo',hour:'2-digit',minute:'2-digit'}); const upd=()=>$('#localtime')&&($('#localtime').textContent='Tokyo '+fmt.format(new Date())); upd(); setInterval(upd,60000); },
+    initAnchors(){ document.addEventListener('click',(e)=>{ const a=e.target.closest('#sidebar .nav a[href^="#"], #mobile-bar a[href^="#"], a.btn[href^="#"]'); if(!a) return; const href=a.getAttribute('href'); if(!href||href==='#') return; e.preventDefault(); const t=document.querySelector(href); if(!t) return; const y=t.getBoundingClientRect().top+scrollY; try{scrollTo({top:y,behavior:'smooth'})}catch{scrollTo(0,y)}; try{history.pushState(null,'',href)}catch{};},{passive:true}); }
+  };
+
+  const NavSpy={
+    sections:[], ids:['home','work','about','travel','writing','contact'], sideLinks:[], rail:null, mobileLinks:[],
+    measure(){ this.sections=$$('#home section[data-warp-min][data-warp-max]').map(el=>({el,min:+el.dataset.warpMin,max:+el.dataset.warpMax,top:0,h:0})); this.sideLinks=$$('#sidebar .nav a'); this.rail=$('#active-rail'); this.mobileLinks=$$('#mobile-bar a'); this.sections.forEach(s=>{const r=s.el.getBoundingClientRect(); s.top=r.top+scrollY; s.h=s.el.offsetHeight;}); },
+    nearest(){ const center=scrollY+innerHeight/2; let best=null,dist=1e9; for(const id of this.ids){ const el=document.getElementById(id); if(!el) continue; const r=el.getBoundingClientRect(); const mid=r.top+scrollY+r.height/2; const d=Math.abs(mid-center); if(d<dist){dist=d;best=id;} } return best; },
+    update(){ const best=this.nearest(); if(!best) return; this.sideLinks.forEach(l=>l.classList.toggle('active', l.getAttribute('href')==='#'+best)); this.mobileLinks.forEach(l=>l.classList.toggle('active', l.dataset.id===best)); if(this.rail){ const link=this.sideLinks.find(l=>l.getAttribute('href')==='#'+best); if(link){ const navBox=$('#sidebar .nav').getBoundingClientRect(); const box=link.getBoundingClientRect(); this.rail.style.transform=`translateY(${Math.max(8, box.top-navBox.top)}px)`; } } },
+    onScroll(){ const center=scrollY+innerHeight/2; let best=null,dist=1e9; for(const s of this.sections){ const mid=s.top+s.h/2; const d=Math.abs(mid-center); if(d<dist){dist=d;best=s;} } if(best){ const p=clamp((center-best.top)/best.h,0,1); Universe2D.setTarget( lerp(best.min,best.max,easeInOutCubic(p)) ); } this.update(); },
+    init(){ this.measure(); addEventListener('resize',()=>this.measure(),{passive:true}); addEventListener('load',()=>{this.measure(); this.update(); this.onScroll();},{passive:true}); let raf=0; addEventListener('scroll',()=>{ if(!raf) raf=requestAnimationFrame(()=>{ raf=0; this.onScroll(); }); },{passive:true}); }
+  };
+
+  const Cursor={ init(){ const ring=$('#cursor-ring'), dot=$('#cursor-dot'), ripple=$('#cursor-ripple'); if(!ring||!dot||!ripple) return; if(!(matchMedia('(any-pointer:fine)').matches)) return; document.body.classList.add('custom-cursor'); let rx=innerWidth/2, ry=innerHeight/2, dx=rx, dy=ry, raf=0, vx=0, vy=0; const move=(e)=>{ const nx=e.clientX, ny=e.clientY; vx=nx-dx; vy=ny-dy; dx=nx; dy=ny; dot.style.left=dx+'px'; dot.style.top=dy+'px'; if(!raf) raf=requestAnimationFrame(tick); }; const tick=()=>{ rx+=(dx-rx)*0.2; ry+=(dy-ry)*0.2; const sp=Math.hypot(vx,vy); const sc=clamp(1+Math.min(sp/120,.35),1,1.35); ring.style.left=rx+'px'; ring.style.top=ry+'px'; ring.style.transform=`translate(-50%,-50%) scale(${sc.toFixed(3)})`; raf=(Math.abs(dx-rx)>.1||Math.abs(dy-ry)>.1)?requestAnimationFrame(tick):0; }; const setActive=(on)=>ring.classList.toggle('active',on); addEventListener('mousemove',move,{passive:true}); addEventListener('mousedown',()=>{ ring.style.transform='translate(-50%,-50%) scale(0.92)'; dot.style.transform='translate(-50%,-50%) scale(0.88)'; ripple.style.left=dx+'px'; ripple.style.top=dy+'px'; ripple.animate([{transform:'translate(-50%,-50%) scale(1)',opacity:.6},{transform:'translate(-50%,-50%) scale(12)',opacity:0}],{duration:420,easing:'cubic-bezier(.2,.8,.2,1)'}); },{passive:true}); addEventListener('mouseup',()=>{ ring.style.transform='translate(-50%,-50%)'; dot.style.transform='translate(-50%,-50%)'; },{passive:true}); ['a','button','[role="button"]','.btn','#sidebar .nav a','#mobile-bar a','input','textarea','select'].forEach(sel=>{ document.addEventListener('mouseover',e=>{ if(e.target.closest(sel)) setActive(true); },{passive:true}); document.addEventListener('mouseout',e=>{ if(e.target.closest(sel)) setActive(false); },{passive:true}); }); if(matchMedia('(prefers-reduced-motion: reduce)').matches) $('#cursor-ripple')?.remove(); } };
+
+  // ===== Universe 2D (lighter on mobile) =====
+  const Universe2D=(()=>{ let canvas,ctx,width=0,height=0,dpr=1,stars=[],clouds=[],sparks=[],telemetry=[],base=0.006,speed=0.006,target=0.006,lastT=performance.now(); const env=Env.get(); const rm = env.reduced; const lightMobile = env.isMobile || env.saveData || env.lowMem; const pointer={x:innerWidth/2,y:innerHeight/2}; const cs=()=>getComputedStyle(document.documentElement); const hsl=(h,s,l,a=1)=>`hsla(${h},${s}%,${l}%,${a})`; const rand=(a,b)=>a+Math.random()*(b-a);
+    function newStar(){ const _cs=cs(); const acc=_cs.getPropertyValue('--star-cool').trim().split(/[\s/]+/).map((v,i)=>i?+v.replace('%',''):+v); const warm=_cs.getPropertyValue('--star-warm').trim().split(/[\s/]+/).map((v,i)=>i?+v.replace('%',''):+v); const z=rand(0.08,1.0); const hot=Math.random()<0.14; const [h,s,l]=(hot?warm:acc); return { x:rand(-1,1), y:rand(-1,1), z, r:rand(0.55,1.35), tw:rand(0,Math.PI*2), sp:rand(0.6,1.4), boost:Math.random()<0.02?rand(1.6,2.2):1.0, h,s,l }; }
+    function newCloud(){ const _cs=cs(); const a1=_cs.getPropertyValue('--acc1').trim().split(/[\s/]+/).map((v,i)=>i?+v.replace('%',''):+v); const a2=_cs.getPropertyValue('--acc2').trim().split(/[\s/]+/).map((v,i)=>i?+v.replace('%',''):+v); const size=rand(0.45,1.05); const hue=Math.random()<0.5?a1[0]:a2[0]; const sat=Math.round(lerp(a1[1],a2[1],Math.random())*0.5); const lig=Math.round(lerp(a1[2],a2[2],Math.random())*0.32); return { x:rand(-0.7,0.7), y:rand(-0.6,0.6), s:size, a:rand(0.04,0.09), dx:rand(-0.005,0.005), dy:rand(-0.003,0.003), hue, sat, lig }; }
+    function newSpark(){ const life=rand(0.25,0.6); return { x:rand(0,width), y:rand(0,height), r:rand(0.6,1.6), t:0, life }; }
+    function newTelemetry(x){ const lines=Math.floor(rand(6,10)); let txt=''; for(let i=0;i<lines;i++){ txt += (Math.random()<0.5? Math.floor(rand(0,9)) : 'ABCDEF'[Math.floor(rand(0,6))]); txt+='\n'; } return { x:x??rand(0,width), y:rand(0,height), vy:-rand(12,24), size:rand(9,12), text:txt, a:rand(0.04,0.08) }; }
+    function project(s,ox=0,oy=0){ const f=Math.min(width,height)*0.6; const sx=(s.x+ox)/s.z*f+width/2; const sy=(s.y+oy)/s.z*f+height/2; const depth=1-s.z; return { sx, sy, depth }; }
+    function drawNebula(dt,ox,oy){ ctx.save(); ctx.globalCompositeOperation='lighter'; for(const c of clouds){ c.x+=c.dx*dt*(0.5+speed*30); c.y+=c.dy*dt*(0.5+speed*30); if(c.x<-1.1)c.x=1.1; if(c.x>1.1)c.x=-1.1; if(c.y<-1.1)c.y=1.1; if(c.y>1.1)c.y=-1.1; const cx=width/2+(c.x+ox*0.25)*width; const cy=height/2+(c.y+oy*0.25)*height; const rad=Math.min(width,height)*c.s; const g=ctx.createRadialGradient(cx,cy,0,cx,cy,rad); g.addColorStop(0,hsl(c.hue,c.sat,Math.min(100,c.lig+25),c.a)); g.addColorStop(1,hsl(c.hue,c.sat,c.lig,0)); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(cx,cy,rad,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+    function drawTelemetry(dt){ if(lightMobile) return; ctx.save(); ctx.globalCompositeOperation='screen'; ctx.textAlign='left'; ctx.textBaseline='top'; for(const t of telemetry){ t.y+=t.vy*dt; if(t.y<-80){ t.y=height+Math.random()*80; t.x=Math.random()*width; t.text=newTelemetry(t.x).text; } ctx.globalAlpha=t.a; ctx.font=`${t.size}px ui-monospace,Menlo,Consolas,monospace`; const lines=t.text.split('\n'); for(let i=0;i<lines.length;i++) ctx.fillText(lines[i], t.x, t.y+i*(t.size*1.08)); } ctx.restore(); }
+    function drawSparks(dt){ if(lightMobile) return; if(Math.random()<dt*(40*speed+2)) sparks.push(newSpark()); if(sparks.length>60) sparks.splice(0, sparks.length-60); ctx.save(); ctx.globalCompositeOperation='lighter'; for(let i=sparks.length-1;i>=0;i--){ const sp=sparks[i]; sp.t+=dt; const k=1-sp.t/sp.life; if(k<=0){ sparks.splice(i,1); continue; } ctx.globalAlpha=0.35*k; ctx.fillStyle='rgba(255,255,255,1)'; ctx.beginPath(); ctx.arc(sp.x, sp.y-(1-k)*12, sp.r*(1+(1-k)*1.2), 0, Math.PI*2); ctx.fill(); } ctx.restore(); }
+    function drawStars(dt,ox,oy){ ctx.lineCap='round'; for(let i=0;i<stars.length;i++){ const s=stars[i]; const prevZ=s.z; s.z-=speed*s.boost*(rm?0.5:1); if(s.z<=0.01){ stars[i]=newStar(); continue; } const p=project(s,ox,oy); const q=project({x:s.x,y:s.y,z:prevZ+0.0001},ox,oy); const tailA=Math.min(1,0.12+p.depth*0.85); ctx.strokeStyle=hsl(s.h,s.s,s.l,tailA); ctx.lineWidth=Math.max(0.5, p.depth*(s.boost>1?3:2)*(1+speed*100)); ctx.beginPath(); ctx.moveTo(q.sx,q.sy); ctx.lineTo(p.sx,p.sy); ctx.stroke(); s.tw+=dt*s.sp; const tw=0.7+0.3*Math.sin(s.tw); const dotA=clamp(tw*(0.35+p.depth*0.75),0,1); ctx.fillStyle=`rgba(255,255,255,${dotA})`; const rr=Math.max(0.45, s.r*(0.6+p.depth*0.9)); ctx.beginPath(); ctx.arc(p.sx,p.sy,rr,0,Math.PI*2); ctx.fill(); } }
+    function vignetteAndPorthole(){ if(App.state.mode==='space') return; const cx=width/2, cy=height/2; const r=Math.min(width,height)*0.55; const g=ctx.createRadialGradient(cx,cy,r*0.9,cx,cy,Math.max(width,height)*0.7); g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,0.62)'); ctx.fillStyle=g; ctx.beginPath(); ctx.rect(0,0,width,height); ctx.fill(); ctx.save(); ctx.globalCompositeOperation='screen'; const css=getComputedStyle(document.documentElement); const port=css.getPropertyValue('--porthole').trim().split(/[\s/]+/).map((v,i)=>i?+v.replace('%',''):+v); const hud=css.getPropertyValue('--hud').trim().split(/[\s/]+/).map((v,i)=>i?+v.replace('%',''):+v); ctx.strokeStyle=`hsla(${port[0]},${port[1]}%,${port[2]}%,0.25)`; ctx.lineWidth=r*0.015; ctx.beginPath(); ctx.arc(cx,cy,r*0.98,0,Math.PI*2); ctx.stroke(); let arcR=r*1.04; ctx.lineWidth=r*0.02; ctx.strokeStyle=`hsla(${hud[0]},${hud[1]}%,${Math.min(100,hud[2]+10)}%,0.10)`; ctx.beginPath(); ctx.arc(cx- r*0.12, cy- r*0.25, arcR, Math.PI*1.12, Math.PI*1.55); ctx.stroke(); ctx.beginPath(); ctx.arc(cx+ r*0.18, cy+ r*0.20, arcR*0.9, Math.PI*0.15, Math.PI*0.42); ctx.stroke(); ctx.lineWidth=r*0.008; ctx.strokeStyle=`hsla(${hud[0]},${hud[1]}%,${hud[2]}%,0.18)`; for(let i=0;i<12;i++){ const a=i/12*Math.PI*2; const x1=cx+Math.cos(a)*r*0.94, y1=cy+Math.sin(a)*r*0.94; const x2=cx+Math.cos(a)*r*0.985, y2=cy+Math.sin(a)*r*0.985; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); } ctx.restore(); if(App.state.mode==='capsule-horizon'){ ctx.save(); const y=cy+ r*0.35; const grd=ctx.createLinearGradient(0,y,0,height); grd.addColorStop(0,'rgba(0,0,0,0.0)'); grd.addColorStop(1,'rgba(0,0,0,0.45)'); ctx.fillStyle=grd; ctx.fillRect(0,y,width,height-y); ctx.restore(); } }
+    function resizeAll(){ width=innerWidth; height=innerHeight; dpr=env.dpr; canvas.width=Math.floor(width*dpr); canvas.height=Math.floor(height*dpr); canvas.style.width=width+'px'; canvas.style.height=height+'px'; ctx.setTransform(dpr,0,0,dpr,0,0);} 
+    function resize(){ const area=width*height; const density= rm?0.00012 : lightMobile?0.00020:0.00030; const count=Math.min(1200,Math.max(180,Math.floor(area*density))); stars=new Array(count).fill(0).map(newStar); clouds=new Array(rm?4: lightMobile?10:16).fill(0).map(newCloud); telemetry= lightMobile? [] : new Array(rm?4:10).fill(0).map(()=>newTelemetry()); }
+    function step(t){ if(!App.state.motion) return; const dt=Math.min(0.05,(t-lastT)/1000); lastT=t; speed+=(target-speed)*Math.min(1,dt*4); ctx.fillStyle='rgba(0,0,0,0.60)'; ctx.fillRect(0,0,width,height); const ox=(pointer.x-width/2)/width*0.18, oy=(pointer.y-height/2)/height*0.18; drawNebula(dt,ox,oy); drawStars(dt,ox,oy); drawSparks(dt); drawTelemetry(dt); vignetteAndPorthole(); requestAnimationFrame(step); }
+    return { init(){ canvas=document.getElementById('universe'); if(!canvas||!canvas.getContext) return; ctx=canvas.getContext('2d',{alpha:true}); if(!ctx) return; resizeAll(); resize(); requestAnimationFrame(step); addEventListener('resize',()=>{ resizeAll(); resize(); },{passive:true}); addEventListener('mousemove',e=>{ pointer.x=e.clientX; pointer.y=e.clientY; },{passive:true}); addEventListener('touchmove',e=>{ if(e.touches&&e.touches[0]){ pointer.x=e.touches[0].clientX; pointer.y=e.touches[0].clientY; } },{passive:true}); }, setTarget(v){ target=v; }, restart(){ if(!App.state.motion) return; requestAnimationFrame(step); } };
+  })();
+
+  // ===== 2D CSS Globe (default on mobile) =====
+  const Globe2D=(()=>{ let root; let px=innerWidth/2, py=innerHeight/2; return {
+    init(){ root=$('#globe2d'); if(!root) return; /* default visible; hidden when 3D enabled */ },
+    hide(){ root && (root.style.display='none'); },
+    show(){ root && (root.style.display='grid'); },
+    parallax(x,y){ px=x; py=y; const el=$('.g2d-wrap'); if(!el) return; const dx=(x/innerWidth-0.5)*10; const dy=(y/innerHeight-0.5)*8; el.style.transform=`translate(${10+dx}%, ${10+dy}%)`; },
+    tilt(beta,gamma){ const sphere=$('.g2d-sphere'); if(!sphere) return; sphere.style.transform=`rotateX(${clamp(beta,-10,10)}deg) rotateY(${clamp(gamma,-10,10)}deg)`; }
+  }})();
+
+  // ===== 3D WebGL Globe (lazy opt-in) =====
+  const Globe3D=(()=>{ let canvas,renderer,scene,camera,earth,clouds,atmo,width=0,height=0; function ensure(){ return canvas && renderer && scene; } return { init(){ canvas=document.getElementById('globe'); if(!canvas||typeof THREE==='undefined') return; canvas.classList.remove('hidden'); Globe2D.hide(); const env=App.state.env; renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true,powerPreference: env.isMobile? 'low-power' : 'high-performance'}); renderer.setPixelRatio(env.dpr); width=innerWidth;height=innerHeight; renderer.setSize(width,height,false); scene=new THREE.Scene(); camera=new THREE.PerspectiveCamera(55,width/height,0.1,100); camera.position.set(0,0,7); scene.add(new THREE.AmbientLight(0xffffff, env.isMobile?0.5:0.6)); const dir=new THREE.DirectionalLight(0xffffff, env.isMobile?1.0:1.2); dir.position.set(-5,2,5); scene.add(dir); const loader=new THREE.TextureLoader(); const texColor=loader.load( env.isMobile? 'https://threejs.org/examples/textures/planets/earth_atmos_1024.jpg' : 'https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg'); const texNormal=loader.load('https://threejs.org/examples/textures/planets/earth_normal_1024.jpg'); const texSpec=loader.load('https://threejs.org/examples/textures/planets/earth_specular_1024.jpg'); const texCloud=loader.load('https://threejs.org/examples/textures/planets/earth_clouds_1024.png'); const geo=new THREE.SphereGeometry(env.isMobile? 1.9:2.2, env.isMobile? 48:64, env.isMobile? 32:64); const mat=new THREE.MeshPhongMaterial({map:texColor,normalMap:texNormal,specularMap:texSpec,specular:new THREE.Color(0x333333),shininess:12}); earth=new THREE.Mesh(geo,mat); earth.position.set(2.0,-1.0,-1.8); earth.scale.set(env.isMobile?1.9:2.1, env.isMobile?1.9:2.1, env.isMobile?1.9:2.1); scene.add(earth); const cloudGeo=new THREE.SphereGeometry(earth.geometry.parameters.radius*1.015,48,48); const cloudMat=new THREE.MeshLambertMaterial({map:texCloud,transparent:true,opacity: env.isMobile?0.40:0.5,depthWrite:false}); clouds=new THREE.Mesh(cloudGeo,cloudMat); clouds.position.copy(earth.position); clouds.scale.copy(earth.scale).multiplyScalar(1.006); scene.add(clouds); const atmoGeo=new THREE.SphereGeometry(earth.geometry.parameters.radius*1.035,48,48); const atmoMat=new THREE.MeshBasicMaterial({color:0x6fb8ff,transparent:true,opacity: env.isMobile?0.14:0.18,blending:THREE.AdditiveBlending,side:THREE.BackSide}); atmo=new THREE.Mesh(atmoGeo,atmoMat); atmo.position.copy(earth.position); atmo.scale.copy(earth.scale).multiplyScalar(1.04); scene.add(atmo); let last=performance.now(), spin=0, px=0.0, py=0.0, raf=0; const tick=(t)=>{ if(!App.state.motion) { raf=requestAnimationFrame(tick); return; } const dt=Math.min(0.05,(t-last)/1000); last=t; spin+=dt*0.06; const ox=(px/width-0.5), oy=(py/height-0.5); const parY=ox*0.6, parX=oy*0.25; earth.rotation.x+=(parX-earth.rotation.x)*0.06; earth.rotation.y=spin+parY; clouds.rotation.x=earth.rotation.x*1.05; clouds.rotation.y=spin*1.15+parY; atmo.rotation.copy(earth.rotation); renderer.render(scene,camera); raf=requestAnimationFrame(tick); }; addEventListener('mousemove',e=>{ px=e.clientX; py=e.clientY; },{passive:true}); addEventListener('touchmove',e=>{ if(e.touches&&e.touches[0]){ px=e.touches[0].clientX; py=e.touches[0].clientY; } },{passive:true}); const onResize=()=>{ width=innerWidth;height=innerHeight; renderer.setSize(width,height,false); renderer.setPixelRatio(App.state.env.dpr); camera.aspect=width/height; camera.updateProjectionMatrix(); }; addEventListener('resize',onResize,{passive:true}); requestAnimationFrame(tick); App.state.webgl=true; }, restart(){ if(ensure()) requestAnimationFrame(()=>renderer && renderer.render(scene,camera)); } } })();
+
+  // ===== Travel Map (lazy) =====
+  const TRAVEL_DATA=[
+    { code:'JP', country:'日本', visits:[ {city:'东京', date:'2024-08'}, {city:'京都', date:'2023-04'} ] },
+    { code:'CN', country:'中国', visits:[ {city:'上海', date:'2019-05'} ] },
+    { code:'US', country:'美国', visits:[ {city:'旧金山', date:'2018-09'} ] },
+    { code:'FR', country:'法国', visits:[ {city:'巴黎', date:'2022-07'} ] }
+  ];
+  const CITY_COORDS={ '东京':[35.6762,139.6503], '京都':[35.0116,135.7681], '上海':[31.2304,121.4737], '旧金山':[37.7749,-122.4194], '巴黎':[48.8566,2.3522] };
+
+  const TravelMap={ map:null, observer:null,
+    observe(){ const target=$('#travel'); if(!('IntersectionObserver' in window) || !target){ this.init(); return; }
+      this.observer=new IntersectionObserver((entries)=>{ entries.forEach(entry=>{ if(entry.isIntersecting && !this.map){ this.init(); this.observer.disconnect(); } }); },{root:null,rootMargin:'200px',threshold:0.01}); this.observer.observe(target); },
+    async init(){ try{ if(typeof jsVectorMap==='undefined'){ await injectScript('https://cdn.jsdelivr.net/npm/jsvectormap/dist/js/jsvectormap.min.js'); await injectScript('https://cdn.jsdelivr.net/npm/jsvectormap/dist/maps/world-merc.js'); }
+      const visited=[...new Set(TRAVEL_DATA.map(d=>d.code))]; const markers=TRAVEL_DATA.flatMap(d=> d.visits.map(v=>({ name:`${d.country} · ${v.city} · ${v.date}`, coords: CITY_COORDS[v.city]||null }))).filter(m=>Array.isArray(m.coords));
+      this.map=new jsVectorMap({ selector:'#worldmap', map:'world_merc', backgroundColor:'transparent', zoomOnScroll:false, regionsSelectable:true, selectedRegions:visited, regionStyle:{ initial:{ fill:'rgba(255,255,255,0.06)' }, hover:{ fill:'rgba(255,255,255,0.22)' }, selected:{ fill:'hsla(38,100%,60%,.88)' } }, markers, markerStyle:{ initial:{ r:4, fill:'hsla(38,100%,60%,.9)', stroke:'rgba(0,0,0,.4)', strokeWidth:2 }, hover:{ fill:'#fff' } } }); this.renderTable(); const ro=new ResizeObserver(()=>this.map&&this.map.updateSize()); ro.observe($('#worldmap')); }catch(e){ console.warn('TravelMap init skipped', e); } },
+    renderTable(){ const tbody=$('#travel-table'); const stats=$('#travel-stats'); tbody.innerHTML=''; let i=1,total=0; const sorted=TRAVEL_DATA.slice().sort((a,b)=> a.country.localeCompare(b.country,'zh-Hans')); for(const d of sorted){ const last=d.visits.slice(-1)[0]?.date||''; const cities=d.visits.map(v=>v.city).join('、'); total+=d.visits.length; const tr=document.createElement('tr'); tr.className='hover:bg-white/5 cursor-pointer'; tr.innerHTML=`<td class="py-2 pr-2 opacity-70">${i++}</td><td class="py-2 pr-2">${d.country}</td><td class="py-2 pr-2">${cities}</td><td class="py-2">${last}</td>`; tr.addEventListener('click',()=>{ try{ this.map && (this.map.setSelected ? this.map.setSelected({regions:[d.code]}) : this.map.setSelectedRegions([d.code])); }catch{} }); tbody.appendChild(tr); } stats.textContent=`国家 ${new Set(TRAVEL_DATA.map(x=>x.code)).size} · 城市 ${total}`; }
+  };
+
+  // ===== Controls =====
+  const Control={ init(){ const fx=$('#fxToggle'); const view=$('#viewSel'); const btn=$('#enable3d'); if(fx){ fx.checked=!matchMedia('(prefers-reduced-motion: reduce)').matches; App.state.motion=fx.checked; fx.addEventListener('change',()=>{ App.state.motion=fx.checked; if(fx.checked){ Universe2D.restart(); if(App.state.webgl) Globe3D.restart(); } }); } if(view){ view.addEventListener('change',()=>{ App.state.mode=view.value; }); } if(btn){ btn.addEventListener('click', async ()=>{ await loadThreeThenInit(); btn.closest('#opt3d')?.remove(); }); } } };
+
+  // ===== Helpers =====
+  function injectScript(src){ return new Promise((resolve,reject)=>{ const s=document.createElement('script'); s.src=src; s.async=true; s.onload=resolve; s.onerror=reject; document.head.appendChild(s); }); }
+  async function loadThreeThenInit(){ if(window.THREE){ Globe3D.init(); return; } try{ await injectScript('https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js'); Globe3D.init(); }catch(e){ console.warn('three.js failed, keep 2D fallback', e); }
+  }
+
+  // Bootstrap
+  (function(){ try{ App.init(); }catch(e){ console.error(e); } })();
+  </script>
+</body>
+</html>
