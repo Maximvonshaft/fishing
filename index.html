@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh-Hans" class="h-full" data-theme="ink-amber">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <meta name="color-scheme" content="dark"/>
+  <meta name="theme-color" content="#0b0e11"/>
+  <title>你的名字 — 清晰为先 · 未来极简</title>
+
+  <!-- Perf hints -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://images.unsplash.com" crossorigin>
+  <link rel="dns-prefetch" href="https://threejs.org">
+  <link rel="preload" as="image" href="https://threejs.org/examples/textures/planets/earth_atmos_1024.jpg" imagesrcset="https://threejs.org/examples/textures/planets/earth_atmos_1024.jpg 1024w, https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg 2048w" imagesizes="(max-width: 768px) 60vw, 30vw">
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+    <script src="tailwind-config.js"></script>
+
+  <!-- Vector Map (lazy injected) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jsvectormap/dist/css/jsvectormap.min.css">
+    <link rel="stylesheet" href="style.css">
+
+</head>
+<body class="h-full">
+  <!-- Backgrounds -->
+  <canvas id="universe" aria-hidden="true"></canvas>
+  <canvas id="globe" aria-hidden="true" class="hidden"></canvas>
+  <div id="globe2d" aria-hidden="true">
+    <div class="g2d-wrap">
+      <div class="g2d-sphere">
+        <div class="g2d-tex" role="presentation"></div>
+        <div class="g2d-shade" role="presentation"></div>
+        <div class="g2d-atmo" role="presentation"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Control panel -->
+  <div id="control" class="hidden md:block">
+    <div class="card p-3 text-xs text-white/90 flex items-center gap-2">
+      <label class="inline-flex items-center gap-1"><input id="fxToggle" type="checkbox" checked>动效</label>
+      <div class="w-px h-5 bg-white/20 mx-1"></div>
+      <label for="viewSel">视图</label>
+      <select id="viewSel">
+        <option value="capsule">舱窗</option>
+        <option value="capsule-horizon">舱窗 + 地平线</option>
+        <option value="space">纯宇宙</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Opt-in 3D for mobile/low-end -->
+  <div id="opt3d" class="md:hidden">
+    <button id="enable3d" class="btn text-xs">启用 3D 地球</button>
+  </div>
+
+  <!-- Mobile capsule nav -->
+  <nav id="mobile-bar" aria-label="底部导航">
+    <div class="wrap">
+      <a href="#home" data-id="home">概览</a>
+      <a href="#work" data-id="work">作品</a>
+      <a href="#about" data-id="about">关于</a>
+      <a href="#travel" data-id="travel">足迹</a>
+      <a href="#writing" data-id="writing">写作</a>
+      <a href="#contact" data-id="contact">联系</a>
+    </div>
+  </nav>
+
+  <div class="layout relative z-10">
+    <!-- Sidebar -->
+    <aside id="sidebar" role="navigation" aria-label="侧边栏">
+      <div class="brand">
+        <div class="logo-slot">LOGO</div>
+        <div>
+          <div class="font-display text-lg">你的品牌 / 名字</div>
+          <div class="text-xs opacity-80">Product · Visual · Interactions</div>
+        </div>
+      </div>
+      <div class="side-intro">未来极简 · 商务科幻。生成视觉 / 交互系统 / 设计工程。</div>
+      <nav class="nav">
+        <div id="active-rail"></div>
+        <a href="#home" class="active">概览</a>
+        <a href="#work">作品</a>
+        <a href="#about">关于</a>
+        <a href="#travel">足迹</a>
+        <a href="#writing">写作</a>
+        <a href="#contact">联系</a>
+      </nav>
+      <div class="side-footer">
+        <div class="flex gap-2">
+          <a href="mailto:hello@example.com" class="btn">邮件</a>
+          <a href="#contact" class="btn">联系</a>
+        </div>
+        <div class="mt-3 opacity-75">© <span id="year"></span> 你的名字</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main id="home">
+      <!-- HERO -->
+      <section data-warp-min="0.004" data-warp-max="0.010" class="container max-w-6xl grid md:grid-cols-2 gap-8 pt-14 md:pt-20 pb-12">
+        <div class="glass glass-strong p-6 md:p-8">
+          <p class="text-sm opacity-80">Portfolio</p>
+          <h1 class="mt-2 font-display text-4xl sm:text-5xl md:text-6xl leading-tight"><span class="gradient-text">清晰为先 · 商务科幻</span></h1>
+          <p class="mt-4 text-base sm:text-lg opacity-90 max-w-prose">未来极简、可读克制。交互 · 生成视觉 · 系统化设计。</p>
+          <div class="mt-6 flex flex-wrap items-center gap-3 text-sm">
+            <a href="#contact" class="btn">与我合作</a>
+            <a href="#work" class="btn">浏览作品</a>
+            <span id="localtime" class="opacity-70" aria-live="polite">—</span>
+          </div>
+          <div class="divider mt-6"></div>
+          <div class="mt-4 grid grid-cols-3 gap-3 text-xs opacity-80">
+            <div><div class="opacity-60">Based</div><div>Tokyo</div></div>
+            <div><div class="opacity-60">Focus</div><div>HCI · Generative</div></div>
+            <div><div class="opacity-60">Open</div><div>Collab / Freelance</div></div>
+          </div>
+        </div>
+        <div class="glass overflow-hidden p-6">
+          <h3 class="font-semibold mb-3">最新动态</h3>
+          <ul class="space-y-2 text-sm opacity-90">
+            <li>· 发布「语义构件 2.0」设计系统</li>
+            <li>· 生成式交互 R&D 进行中</li>
+            <li>· 接受驻地 / 合作：欢迎邮件</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- WORK -->
+      <section id="work" data-warp-min="0.010" data-warp-max="0.022" class="container max-w-6xl py-12 md:py-16">
+        <h2 class="font-display text-2xl sm:text-3xl gradient-text mb-6">精选作品</h2>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <article class="glass p-3"><div class="h-56 rounded-lg overflow-hidden"><img loading="lazy" decoding="async" class="w-full h-full object-cover" src="https://images.unsplash.com/photo-1495567720989-cebdbdd97913?q=80&w=1200&auto=format&fit=crop" alt="夜色分形预览"/></div><div class="mt-3 flex items-center justify-between"><h3 class="font-semibold">夜色分形</h3><span class="text-xs opacity-70">GLSL</span></div></article>
+          <article class="glass p-3"><div class="h-56 rounded-lg overflow-hidden"><img loading="lazy" decoding="async" class="w-full h-full object-cover" src="https://images.unsplash.com/photo-1549880338-65ddcdfd017b?q=80&w=1200&auto=format&fit=crop" alt="风的形状预览"/></div><div class="mt-3 flex items-center justify-between"><h3 class="font-semibold">风的形状</h3><span class="text-xs opacity-70">Motion</span></div></article>
+          <article class="glass p-3"><div class="h-56 rounded-lg overflow-hidden"><img loading="lazy" decoding="async" class="w-full h-full object-cover" src="https://images.unsplash.com/photo-1517694712202-14dd9538aa97?q=80&w=1200&auto=format&fit=crop" alt="语义构件预览"/></div><div class="mt-3 flex items-center justify-between"><h3 class="font-semibold">语义构件</h3><span class="text-xs opacity-70">Design System</span></div></article>
+        </div>
+      </section>
+
+      <!-- ABOUT -->
+      <section id="about" data-warp-min="0.003" data-warp-max="0.007" class="container max-w-6xl py-12 md:py-16">
+        <div class="glass p-6 md:p-8">
+          <div class="grid md:grid-cols-3 gap-8 items-start">
+            <div class="md:col-span-1">
+              <div class="relative h-48 w-48 rounded-full overflow-hidden">
+                <img loading="lazy" decoding="async" alt="头像" class="h-full w-full object-cover" src="https://images.unsplash.com/photo-1527980965255-d3b416303d12?q=80&w=600&auto=format&fit=crop"/>
+              </div>
+            </div>
+            <div class="md:col-span-2">
+              <h2 class="font-display text-2xl sm:text-3xl gradient-text mb-3">关于我</h2>
+              <p class="leading-relaxed opacity-90 max-w-prose">跨学科创作者，专注人机交互、可视化与生成艺术。以系统化思维贯穿，平衡理性与诗意。</p>
+              <div class="divider my-5"></div>
+              <ul class="grid sm:grid-cols-2 gap-3 text-sm">
+                <li class="glass p-3">🏆 Awwwards SOTD（示例）</li>
+                <li class="glass p-3">🎨 Adobe Design Achievement（示例）</li>
+                <li class="glass p-3">💼 服务品牌：X / Y / Z</li>
+                <li class="glass p-3">🧪 研究方向：生成式交互</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TRAVEL -->
+      <section id="travel" data-warp-min="0.005" data-warp-max="0.015" class="container max-w-6xl py-12 md:py-16">
+        <h2 class="font-display text-2xl sm:text-3xl gradient-text mb-6">我的足迹</h2>
+        <div class="grid md:grid-cols-5 gap-4">
+          <div class="md:col-span-3 glass p-3">
+            <div id="worldmap" class="h-[420px] sm:h-[520px] rounded-lg overflow-hidden"></div>
+          </div>
+          <div class="md:col-span-2 glass p-4">
+            <div class="flex items-center justify-between">
+              <h3 class="font-semibold">到访国家</h3>
+              <span class="text-xs opacity-70" id="travel-stats">—</span>
+            </div>
+            <div class="divider my-3"></div>
+            <div class="overflow-auto max-h-[520px]">
+              <table class="w-full text-sm" aria-describedby="travel-stats">
+                <thead class="text-xs opacity-70">
+                  <tr>
+                    <th class="text-left py-2 pr-2">#</th>
+                    <th class="text-left py-2 pr-2">国家/地区</th>
+                    <th class="text-left py-2 pr-2">城市</th>
+                    <th class="text-left py-2">最近时间</th>
+                  </tr>
+                </thead>
+                <tbody id="travel-table"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- WRITING -->
+      <section id="writing" data-warp-min="0.006" data-warp-max="0.012" class="container max-w-6xl py-12 md:py-16">
+        <h2 class="font-display text-2xl sm:text-3xl gradient-text mb-6">最近写作</h2>
+        <div class="grid md:grid-cols-2 gap-4">
+          <article class="glass p-5"><h3 class="font-semibold">界面中的留白作为节拍</h3><p class="text-sm opacity-80 mt-1">节拍感如何组织信息密度。</p><a class="mt-3 inline-flex items-center gap-1 underline underline-offset-4" href="#">阅读 →</a></article>
+          <article class="glass p-5"><h3 class="font-semibold">用生成算法雕刻光线</h3><p class="text-sm opacity-80 mt-1">从噪声函数到体积光的可视化探索。</p><a class="mt-3 inline-flex items-center gap-1 underline underline-offset-4" href="#">阅读 →</a></article>
+        </div>
+      </section>
+
+      <!-- CONTACT -->
+      <section id="contact" data-warp-min="0.002" data-warp-max="0.004" class="container max-w-6xl py-12 md:py-20">
+        <div class="glass p-8 md:p-12">
+          <h2 class="font-display text-2xl sm:text-3xl">让我们一起创造</h2>
+          <p class="mt-2 text-sm opacity-80 max-w-prose">邮件、社媒或表单皆可。如果你有项目、驻地计划或展览合作，欢迎抛来灵感。</p>
+          <div class="mt-6 flex flex-wrap gap-3 text-sm">
+            <a class="btn" href="mailto:hello@example.com">发邮件</a>
+            <a class="btn" href="https://x.com" target="_blank" rel="noreferrer noopener">X / Twitter</a>
+            <a class="btn" href="https://instagram.com" target="_blank" rel="noreferrer noopener">Instagram</a>
+            <a class="btn" href="#">表单</a>
+          </div>
+        </div>
+      </section>
+
+      <footer class="container max-w-6xl pb-12 pt-6 text-xs opacity-80">© <span id="footer-year"></span> 你的名字 · 可自由改造</footer>
+    </main>
+  </div>
+
+  <!-- Cursor nodes -->
+  <div id="cursor-ring"></div>
+  <div id="cursor-dot"></div>
+  <div id="cursor-ripple"></div>
+
+  <script type="module" src="app.js"></script>
+  <script type="module" src="rift.js"></script>
+</body>
+</html>
