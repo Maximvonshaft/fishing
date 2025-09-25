@@ -73,6 +73,32 @@ function view(string $template, array $data = []): void
     include $layoutPath;
 }
 
+function app_script_path(): string
+{
+    static $script;
+    if ($script !== null) {
+        return $script;
+    }
+
+    $configured = config('app.base_script');
+    if (is_string($configured) && $configured !== '') {
+        $script = $configured;
+        return $script;
+    }
+
+    $scriptName = $_SERVER['SCRIPT_NAME'] ?? ($_SERVER['PHP_SELF'] ?? '');
+    if ($scriptName !== '') {
+        if ($scriptName[0] !== '/') {
+            $scriptName = '/' . ltrim($scriptName, '/');
+        }
+        $script = $scriptName;
+    } else {
+        $script = '/public/index.php';
+    }
+
+    return $script;
+}
+
 function route(string $name, array $params = []): string
 {
     $map = [
@@ -88,11 +114,20 @@ function route(string $name, array $params = []): string
         'users.manage' => 'users',
         'vendors.manage' => 'vendors',
         'tasks.show' => 'node',
+        'auth.logout' => ['action' => 'logout'],
     ];
 
-    $page = $map[$name] ?? 'projects';
-    $query = http_build_query(array_merge(['page' => $page], $params));
-    return '/public/index.php?' . $query;
+    $target = $map[$name] ?? 'projects';
+    if (is_array($target)) {
+        $queryParams = array_merge($target, $params);
+    } else {
+        $queryParams = array_merge(['page' => $target], $params);
+    }
+
+    $query = http_build_query($queryParams);
+    $script = app_script_path();
+
+    return $query === '' ? $script : $script . '?' . $query;
 }
 
 function redirect(string $url): never

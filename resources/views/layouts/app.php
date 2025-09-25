@@ -88,7 +88,7 @@
                         <?php if (($user['role'] ?? '') === 'admin'): ?>管理员<?php else: ?><?= htmlspecialchars($user['vendor_name'] ?? '') ?><?php endif; ?>
                     </span>
                 </div>
-                <a href="<?= htmlspecialchars('/public/index.php?action=logout') ?>" class="inline-flex items-center gap-2 text-slate-500 hover:text-brand">
+                <a href="<?= htmlspecialchars(route('auth.logout')) ?>" class="inline-flex items-center gap-2 text-slate-500 hover:text-brand">
                     退出
                 </a>
             </div>

@@ -7,6 +7,7 @@ return [
         'timezone' => 'UTC',
         'display_timezone' => 'Europe/Tirane',
         'warn_minutes' => 120,
+        'base_script' => null,
     ],
     'security' => [
         'session_name' => 'fishing_session',
