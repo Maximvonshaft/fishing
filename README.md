@@ -33,5 +33,6 @@ Then open `http://localhost:8000/index.php?page=projects` to browse the prototyp
 ## Further Reading
 
 - [End-to-End Implementation Plan](docs/dev_plan.md)
+- [SQLite 全栈开发清单 v2](docs/sqlite_checklist_v2.md)
 
 This foundation can be swapped into a full Laravel application by replacing the helper renderer with native Blade, wiring controllers, and connecting to real data sources.
