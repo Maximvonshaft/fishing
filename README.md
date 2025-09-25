@@ -11,7 +11,7 @@ This repository provides a PHP-based prototype that mirrors the Logistics SLA fr
   - Authentication (`auth/`): login, MFA, first-time setup flows.
   - Navigation layout (`layouts/`): authenticated shell and guest layout.
   - Domain pages: projects catalogue, shipments list & detail timeline, vendor task inbox, template configurator, KPI reports, and system settings.
-- `docs/` – previous documentation assets (country pack JSON, field dictionary, and UAT scenarios).
+- `docs/` – documentation assets (country pack JSON, field dictionary, UAT scenarios, and implementation guidance).
 
 ## Usage
 
@@ -29,5 +29,9 @@ Then open `http://localhost:8000/index.php?page=projects` to browse the prototyp
 - SLA countdowns display the remaining minutes based on mocked data and include explain modals that outline the calculation basis.
 - Upload, signature, and reassignment interactions are presented as interactive placeholders using Alpine.js to demonstrate flows without backend wiring.
 - The UI follows the provided color tokens (green/yellow/red/gray) and component guidance (timeline cards, evidence lists, countdown badges, modal dialogs).
+
+## Further Reading
+
+- [End-to-End Implementation Plan](docs/dev_plan.md)
 
 This foundation can be swapped into a full Laravel application by replacing the helper renderer with native Blade, wiring controllers, and connecting to real data sources.
