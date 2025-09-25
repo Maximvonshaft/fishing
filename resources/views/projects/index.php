@@ -25,7 +25,7 @@
     </div>
     <div class="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
         <?php foreach ($projects as $project): ?>
-            <a href="<?= route('shipments.index', ['project' => $project['code']]) ?>" class="p-5 border border-slate-200 rounded-2xl hover:border-brand/50 hover:shadow transition bg-white flex flex-col gap-4">
+            <a href="<?= route('shipments.index', ['country' => $project['code']]) ?>" class="p-5 border border-slate-200 rounded-2xl hover:border-brand/50 hover:shadow transition bg-white flex flex-col gap-4">
                 <div class="flex items-center justify-between">
                     <div>
                         <div class="text-xs font-semibold uppercase tracking-widest text-slate-400">国家</div>
