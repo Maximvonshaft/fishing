@@ -28,6 +28,12 @@ date_default_timezone_set($config['app']['timezone'] ?? 'UTC');
 
 Database::connection();
 
+try {
+    uploads_directory();
+} catch (RuntimeException $e) {
+    error_log('[bootstrap] Upload directory setup failed: ' . $e->getMessage());
+}
+
 if (!isset($_SESSION[$config['security']['csrf_token_key']])) {
     $_SESSION[$config['security']['csrf_token_key']] = bin2hex(random_bytes(32));
 }

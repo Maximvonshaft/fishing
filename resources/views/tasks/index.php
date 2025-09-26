@@ -34,7 +34,20 @@ $displayTz = config('app.display_timezone', 'Europe/Tirane');
                     };
                     ?>
                     <tr class="hover:bg-brand/5">
-                        <td class="px-4 py-4 font-semibold text-slate-900"><?= htmlspecialchars($task['node_name']) ?></td>
+                        <td class="px-4 py-4 font-semibold text-slate-900">
+                            <?= htmlspecialchars($task['node_name']) ?>
+                            <?php if (!empty($task['required_actions'])): ?>
+                                <div class="mt-1 flex flex-wrap gap-2 text-xs">
+                                    <?php foreach ($task['required_actions'] as $action): ?>
+                                        <?php if ($action === 'UPLOAD_EVIDENCE'): ?>
+                                            <span class="inline-flex items-center gap-1 rounded-full border border-amber-200 px-2 py-0.5 text-amber-600">需上传附件</span>
+                                        <?php elseif ($action === 'SIGN'): ?>
+                                            <span class="inline-flex items-center gap-1 rounded-full border border-emerald-200 px-2 py-0.5 text-emerald-600">需签名</span>
+                                        <?php endif; ?>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </td>
                         <td class="px-4 py-4 text-slate-600">
                             <div><?= htmlspecialchars($task['shipment_code']) ?></div>
                             <div class="text-xs text-slate-400">国家：<?= htmlspecialchars($task['country']) ?></div>

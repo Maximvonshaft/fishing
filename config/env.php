@@ -9,6 +9,11 @@ return [
         'warn_minutes' => 120,
         'base_script' => null,
     ],
+    'uploads' => [
+        'dir' => __DIR__ . '/../storage/uploads',
+        'max_size' => 20 * 1024 * 1024,
+        'allowed_extensions' => ['pdf', 'jpg', 'jpeg', 'png'],
+    ],
     'security' => [
         'session_name' => 'fishing_session',
         'csrf_token_key' => '_csrf_token',

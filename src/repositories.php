@@ -352,6 +352,66 @@ function get_shipment_detail(int $shipmentId, array $user): ?array
     ];
 }
 
+function get_node_files(int $nodeId): array
+{
+    $stmt = db()->prepare('SELECT id, file_name, mime_type, size_bytes, sha256, storage_path, uploaded_by, created_at
+        FROM node_files WHERE node_id = ? ORDER BY created_at ASC');
+    $stmt->execute([$nodeId]);
+    $rows = $stmt->fetchAll();
+
+    return array_map(static function (array $row): array {
+        return [
+            'id' => (int) $row['id'],
+            'name' => $row['file_name'],
+            'mime_type' => $row['mime_type'],
+            'size_bytes' => (int) $row['size_bytes'],
+            'size_label' => format_bytes((int) $row['size_bytes']),
+            'sha256' => $row['sha256'],
+            'sha256_prefix' => substr($row['sha256'], 0, 8),
+            'download_url' => route('files.download', ['file_id' => (int) $row['id']]),
+            'uploaded_at' => $row['created_at'],
+        ];
+    }, $rows);
+}
+
+function get_node_signatures(int $nodeId): array
+{
+    $stmt = db()->prepare('SELECT ns.*, u.display_name FROM node_signatures ns JOIN users u ON u.id = ns.user_id WHERE ns.node_id = ? ORDER BY ns.created_at ASC');
+    $stmt->execute([$nodeId]);
+    $rows = $stmt->fetchAll();
+
+    return array_map(static function (array $row): array {
+        return [
+            'id' => (int) $row['id'],
+            'user_id' => (int) $row['user_id'],
+            'display_name' => $row['display_name'],
+            'signer_name' => $row['signer_name'],
+            'method' => $row['method'],
+            'ip' => $row['ip'],
+            'device' => $row['device'],
+            'geo_lat' => $row['geo_lat'],
+            'geo_lng' => $row['geo_lng'],
+            'created_at' => $row['created_at'],
+        ];
+    }, $rows);
+}
+
+function count_node_files(int $nodeId, ?\PDO $pdo = null): int
+{
+    $pdo = $pdo ?? db();
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM node_files WHERE node_id = ?');
+    $stmt->execute([$nodeId]);
+    return (int) $stmt->fetchColumn();
+}
+
+function count_node_signatures(int $nodeId, ?\PDO $pdo = null): int
+{
+    $pdo = $pdo ?? db();
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM node_signatures WHERE node_id = ?');
+    $stmt->execute([$nodeId]);
+    return (int) $stmt->fetchColumn();
+}
+
 function format_node_for_user(array $node, array $user): array
 {
     $canViewFull = $user['role'] === 'admin' || is_node_accessible_to_user($node, $user);
@@ -380,6 +440,8 @@ function format_node_for_user(array $node, array $user): array
         'sla_hours' => (float) $node['sla_hours'],
         'evidence_required' => (int) $node['evidence_required'] === 1,
         'signature_required' => (int) $node['signature_required'] === 1,
+        'files' => get_node_files((int) $node['id']),
+        'signatures' => get_node_signatures((int) $node['id']),
     ];
 }
 
@@ -412,9 +474,23 @@ function can_user_complete_node(array $node, array $user): bool
 function fetch_user_tasks(array $user): array
 {
     if ($user['role'] === 'admin') {
-        $stmt = db()->query('SELECT sn.*, s.country_id, s.code, c.code AS country_code FROM shipment_nodes sn JOIN shipments s ON s.id = sn.shipment_id JOIN countries c ON c.id = s.country_id WHERE sn.status = "PENDING" ORDER BY sn.deadline_utc IS NULL, sn.deadline_utc ASC');
+        $stmt = db()->query('SELECT sn.*, s.country_id, s.code, c.code AS country_code,
+            (SELECT COUNT(*) FROM node_files nf WHERE nf.node_id = sn.id) AS evidence_count,
+            (SELECT COUNT(*) FROM node_signatures ns WHERE ns.node_id = sn.id) AS signature_count
+            FROM shipment_nodes sn
+            JOIN shipments s ON s.id = sn.shipment_id
+            JOIN countries c ON c.id = s.country_id
+            WHERE sn.status = "PENDING"
+            ORDER BY sn.deadline_utc IS NULL, sn.deadline_utc ASC');
     } else {
-        $stmt = db()->prepare('SELECT sn.*, s.country_id, s.code, c.code AS country_code FROM shipment_nodes sn JOIN shipments s ON s.id = sn.shipment_id JOIN countries c ON c.id = s.country_id WHERE sn.status = "PENDING" AND (sn.assignee_user_id = ? OR (sn.assignee_user_id IS NULL AND sn.vendor_id = ?)) ORDER BY sn.deadline_utc IS NULL, sn.deadline_utc ASC');
+        $stmt = db()->prepare('SELECT sn.*, s.country_id, s.code, c.code AS country_code,
+            (SELECT COUNT(*) FROM node_files nf WHERE nf.node_id = sn.id) AS evidence_count,
+            (SELECT COUNT(*) FROM node_signatures ns WHERE ns.node_id = sn.id) AS signature_count
+            FROM shipment_nodes sn
+            JOIN shipments s ON s.id = sn.shipment_id
+            JOIN countries c ON c.id = s.country_id
+            WHERE sn.status = "PENDING" AND (sn.assignee_user_id = ? OR (sn.assignee_user_id IS NULL AND sn.vendor_id = ?))
+            ORDER BY sn.deadline_utc IS NULL, sn.deadline_utc ASC');
         $stmt->execute([$user['id'], $user['vendor_id']]);
         return map_tasks($stmt->fetchAll());
     }
@@ -424,7 +500,14 @@ function fetch_user_tasks(array $user): array
 
 function fetch_user_tasks_for_vendor(int $vendorId): array
 {
-    $stmt = db()->prepare('SELECT sn.*, s.country_id, s.code, c.code AS country_code FROM shipment_nodes sn JOIN shipments s ON s.id = sn.shipment_id JOIN countries c ON c.id = s.country_id WHERE sn.status = "PENDING" AND (sn.assignee_user_id IN (SELECT id FROM users WHERE vendor_id = ?) OR sn.vendor_id = ?) ORDER BY sn.deadline_utc IS NULL, sn.deadline_utc ASC');
+    $stmt = db()->prepare('SELECT sn.*, s.country_id, s.code, c.code AS country_code,
+        (SELECT COUNT(*) FROM node_files nf WHERE nf.node_id = sn.id) AS evidence_count,
+        (SELECT COUNT(*) FROM node_signatures ns WHERE ns.node_id = sn.id) AS signature_count
+        FROM shipment_nodes sn
+        JOIN shipments s ON s.id = sn.shipment_id
+        JOIN countries c ON c.id = s.country_id
+        WHERE sn.status = "PENDING" AND (sn.assignee_user_id IN (SELECT id FROM users WHERE vendor_id = ?) OR sn.vendor_id = ?)
+        ORDER BY sn.deadline_utc IS NULL, sn.deadline_utc ASC');
     $stmt->execute([$vendorId, $vendorId]);
     return map_tasks($stmt->fetchAll());
 }
@@ -432,6 +515,14 @@ function fetch_user_tasks_for_vendor(int $vendorId): array
 function map_tasks(array $rows): array
 {
     return array_map(static function (array $row): array {
+        $required = [];
+        if ((int) ($row['evidence_required'] ?? 0) === 1 && (int) ($row['evidence_count'] ?? 0) === 0) {
+            $required[] = 'UPLOAD_EVIDENCE';
+        }
+        if ((int) ($row['signature_required'] ?? 0) === 1 && (int) ($row['signature_count'] ?? 0) === 0) {
+            $required[] = 'SIGN';
+        }
+
         return [
             'node_id' => (int) $row['id'],
             'shipment_id' => (int) $row['shipment_id'],
@@ -441,7 +532,7 @@ function map_tasks(array $rows): array
             'deadline_utc' => $row['deadline_utc'],
             'remaining_minutes' => $row['remaining_minutes'] !== null ? (int) $row['remaining_minutes'] : null,
             'sla_status' => $row['sla_status'],
-            'required_actions' => [],
+            'required_actions' => $required,
         ];
     }, $rows);
 }

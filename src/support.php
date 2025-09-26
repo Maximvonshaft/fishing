@@ -28,6 +28,94 @@ function config(string $key, mixed $default = null): mixed
     return $value;
 }
 
+function ensure_directory(string $path): void
+{
+    if (is_dir($path)) {
+        return;
+    }
+
+    if (!mkdir($path, 0775, true) && !is_dir($path)) {
+        throw new RuntimeException('Unable to create directory: ' . $path);
+    }
+}
+
+function uploads_directory(): string
+{
+    $dir = config('uploads.dir');
+    if (!is_string($dir) || $dir === '') {
+        throw new RuntimeException('Upload directory is not configured.');
+    }
+
+    ensure_directory($dir);
+
+    return $dir;
+}
+
+function upload_allowed_extensions(): array
+{
+    $extensions = config('uploads.allowed_extensions', []);
+    if (!is_array($extensions)) {
+        return [];
+    }
+
+    return array_values(array_unique(array_map(static fn($ext) => strtolower((string) $ext), $extensions)));
+}
+
+function normalize_uploads_array(?array $files): array
+{
+    if ($files === null || !isset($files['name'])) {
+        return [];
+    }
+
+    $normalized = [];
+
+    if (is_array($files['name'])) {
+        foreach ($files['name'] as $index => $name) {
+            $normalized[] = [
+                'name' => $name,
+                'type' => $files['type'][$index] ?? null,
+                'tmp_name' => $files['tmp_name'][$index] ?? null,
+                'error' => $files['error'][$index] ?? UPLOAD_ERR_NO_FILE,
+                'size' => $files['size'][$index] ?? 0,
+            ];
+        }
+        return $normalized;
+    }
+
+    $normalized[] = [
+        'name' => $files['name'],
+        'type' => $files['type'] ?? null,
+        'tmp_name' => $files['tmp_name'] ?? null,
+        'error' => $files['error'] ?? UPLOAD_ERR_NO_FILE,
+        'size' => $files['size'] ?? 0,
+    ];
+
+    return $normalized;
+}
+
+function sanitize_uploaded_filename(string $name): string
+{
+    $basename = preg_replace('/[^A-Za-z0-9_\-.]+/', '_', $name);
+    $basename = trim((string) $basename, '_');
+    if ($basename === '') {
+        $basename = 'attachment';
+    }
+
+    return $basename;
+}
+
+function format_bytes(int $bytes): string
+{
+    if ($bytes < 1024) {
+        return $bytes . ' B';
+    }
+    if ($bytes < 1024 * 1024) {
+        return round($bytes / 1024, 1) . ' KB';
+    }
+
+    return round($bytes / 1024 / 1024, 1) . ' MB';
+}
+
 function csrf_token(): string
 {
     $key = config('security.csrf_token_key', '_csrf_token');
@@ -152,6 +240,7 @@ function route(string $name, array $params = []): string
         'vendors.manage' => 'vendors',
         'tasks.show' => 'node',
         'auth.logout' => ['action' => 'logout'],
+        'files.download' => ['action' => 'download_file'],
     ];
 
     $target = $map[$name] ?? 'projects';

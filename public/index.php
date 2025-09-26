@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+
 require __DIR__ . '/../src/bootstrap.php';
 require __DIR__ . '/../src/auth.php';
 require __DIR__ . '/../src/repositories.php';
@@ -11,6 +12,18 @@ $action = $_POST['_action'] ?? $_GET['action'] ?? null;
 if ($action === 'logout') {
     logout_user();
     redirect(route('auth.login'));
+}
+
+if ($action === 'download_file') {
+    $user = require_login();
+    $fileId = (int) ($_GET['file_id'] ?? 0);
+    try {
+        download_node_file($fileId, $user);
+    } catch (RuntimeException $e) {
+        http_response_code($e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 404);
+        echo $e->getMessage();
+    }
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -376,9 +389,14 @@ function handle_post_action(?string $action): void
             $user = require_login();
             $nodeId = (int) ($_POST['node_id'] ?? 0);
             $actualTime = $_POST['actual_time'] ?? '';
-            complete_node($nodeId, $actualTime, $user);
-            flash('success', '节点已完成');
-            redirect(route('tasks.index'));
+            try {
+                complete_node($nodeId, $actualTime, $user, $_FILES, $_POST);
+                flash('success', '节点已完成');
+                redirect(route('tasks.index'));
+            } catch (RuntimeException $e) {
+                flash('error', $e->getMessage());
+                redirect(route('tasks.show', ['node_id' => $nodeId]));
+            }
             break;
         default:
             break;
@@ -405,81 +423,270 @@ function fetch_node_for_user(int $nodeId, array $user): ?array
 
     $node['code'] = $node['shipment_code'];
     $node['country'] = $node['country_code'] ?? '';
+    $node['files'] = get_node_files($nodeId);
+    $node['signatures'] = get_node_signatures($nodeId);
 
     return $node;
 }
 
-function complete_node(int $nodeId, string $actualTime, array $user): void
+function complete_node(int $nodeId, string $actualTime, array $user, array $files, array $post): void
 {
     $node = fetch_node_for_user($nodeId, $user);
     if (!$node) {
-        http_response_code(403);
-        echo 'Forbidden';
-        exit;
+        throw new RuntimeException('节点不存在或无权访问。');
     }
 
     if ($node['status'] === 'DONE') {
-        return;
+        throw new RuntimeException('该节点已完成，无需重复提交。');
     }
 
     if ($user['role'] !== 'admin' && !is_node_accessible_to_user($node, $user)) {
-        http_response_code(403);
-        echo 'Forbidden';
-        exit;
+        throw new RuntimeException('您无权操作该节点。');
     }
 
     $prevStmt = db()->prepare('SELECT status FROM shipment_nodes WHERE shipment_id = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1');
     $prevStmt->execute([$node['shipment_id'], $node['sort_order']]);
     $previous = $prevStmt->fetch();
     if ($previous && $previous['status'] !== 'DONE') {
-        http_response_code(409);
-        echo '前序节点未完成';
-        exit;
+        throw new RuntimeException('前序节点未完成，无法提交。');
     }
 
     try {
         $dt = new DateTimeImmutable($actualTime ?: 'now', new DateTimeZone('UTC'));
     } catch (Throwable $e) {
-        http_response_code(422);
-        echo '时间格式错误';
-        exit;
+        throw new RuntimeException('实际完成时间格式错误，请填写有效的 UTC 时间。');
     }
 
     $actualUtc = $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     $warnMinutes = (int) config('app.warn_minutes', 120);
-    $newSlaStatus = $node['sla_status'];
-    $remainingAfter = $node['remaining_minutes'];
 
-    if (!empty($node['deadline_utc'])) {
-        $deadline = new DateTimeImmutable($node['deadline_utc'], new DateTimeZone('UTC'));
-        $actual = new DateTimeImmutable($actualUtc, new DateTimeZone('UTC'));
-        $remainingAfter = (int) floor(($deadline->getTimestamp() - $actual->getTimestamp()) / 60);
-        $newSlaStatus = $remainingAfter < 0 ? 'BREACH' : ($remainingAfter <= $warnMinutes ? 'WARN' : 'OK');
+    $uploads = normalize_uploads_array($files['evidences'] ?? null);
+    $pdo = db();
+    $storedFiles = [];
+
+    $pdo->beginTransaction();
+    try {
+        foreach ($uploads as $upload) {
+            if ((int) ($upload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+                continue;
+            }
+            if ((int) $upload['error'] !== UPLOAD_ERR_OK) {
+                throw new RuntimeException('附件上传失败，请重试。');
+            }
+            $storedFiles[] = persist_node_file($pdo, $node, $upload, $user);
+        }
+
+        $signatureValue = trim((string) ($post['signature_value'] ?? ''));
+        $signatureMethod = $post['signature_method'] ?? 'pin';
+        if ($signatureValue !== '') {
+            persist_node_signature($pdo, $node, $user, $signatureValue, $signatureMethod);
+        }
+
+        if ((int) $node['evidence_required'] === 1 && count_node_files($nodeId, $pdo) === 0) {
+            throw new RuntimeException('该节点要求上传附件，请先上传后再提交。');
+        }
+
+        if ((int) $node['signature_required'] === 1 && count_node_signatures($nodeId, $pdo) === 0) {
+            throw new RuntimeException('该节点要求签名，请完成签署后再提交。');
+        }
+
+        $newSlaStatus = $node['sla_status'];
+        $remainingAfter = $node['remaining_minutes'];
+
+        if (!empty($node['deadline_utc'])) {
+            $deadline = new DateTimeImmutable($node['deadline_utc'], new DateTimeZone('UTC'));
+            $actual = new DateTimeImmutable($actualUtc, new DateTimeZone('UTC'));
+            $remainingAfter = (int) floor(($deadline->getTimestamp() - $actual->getTimestamp()) / 60);
+            $newSlaStatus = $remainingAfter < 0 ? 'BREACH' : ($remainingAfter <= $warnMinutes ? 'WARN' : 'OK');
+        }
+
+        $update = $pdo->prepare('UPDATE shipment_nodes SET status = "DONE", actual_time = ?, remaining_minutes = ?, sla_status = ?, updated_at = datetime("now") WHERE id = ?');
+        $update->execute([$actualUtc, $remainingAfter, $newSlaStatus, $nodeId]);
+
+        record_shipment_event((int) $node['shipment_id'], $nodeId, 'NODE_DONE', [
+            'actual_time' => $actualUtc,
+            'completed_by' => $user['id'],
+        ]);
+
+        $nextStmt = $pdo->prepare('SELECT * FROM shipment_nodes WHERE shipment_id = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1');
+        $nextStmt->execute([$node['shipment_id'], $node['sort_order']]);
+        $nextNode = $nextStmt->fetch();
+        if ($nextNode && $nextNode['base_type'] === 'previous') {
+            $deadline = (new DateTimeImmutable($actualUtc, new DateTimeZone('UTC')))->modify('+' . (float) $nextNode['sla_hours'] . ' hours');
+            $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+            $remaining = (int) floor(($deadline->getTimestamp() - $now->getTimestamp()) / 60);
+            $status = $remaining < 0 ? 'BREACH' : ($remaining <= $warnMinutes ? 'WARN' : 'OK');
+            $updateNext = $pdo->prepare('UPDATE shipment_nodes SET deadline_utc = ?, remaining_minutes = ?, sla_status = ?, updated_at = datetime("now") WHERE id = ?');
+            $updateNext->execute([$deadline->format('Y-m-d H:i:s'), $remaining, $status, $nextNode['id']]);
+            record_shipment_event((int) $node['shipment_id'], (int) $nextNode['id'], 'SLA_RECALCULATED', [
+                'trigger' => $nodeId,
+                'deadline' => $deadline->format('Y-m-d H:i:s'),
+                'remaining' => $remaining,
+                'status' => $status,
+            ]);
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        foreach ($storedFiles as $stored) {
+            if (isset($stored['path']) && is_string($stored['path']) && is_file($stored['path'])) {
+                @unlink($stored['path']);
+            }
+        }
+        if ($e instanceof RuntimeException) {
+            throw $e;
+        }
+        throw new RuntimeException('节点提交失败，请稍后再试。');
+    }
+}
+
+function persist_node_file(PDO $pdo, array $node, array $upload, array $user): array
+{
+    $originalName = (string) ($upload['name'] ?? '');
+    $filename = sanitize_uploaded_filename($originalName !== '' ? $originalName : 'attachment');
+    $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+    $allowed = upload_allowed_extensions();
+    if ($extension === '' || !in_array($extension, $allowed, true)) {
+        throw new RuntimeException('附件类型不允许，请上传 pdf/jpg/png。');
     }
 
-    $update = db()->prepare('UPDATE shipment_nodes SET status = "DONE", actual_time = ?, remaining_minutes = ?, sla_status = ?, updated_at = datetime("now") WHERE id = ?');
-    $update->execute([$actualUtc, $remainingAfter, $newSlaStatus, $nodeId]);
+    $maxSize = (int) config('uploads.max_size', 20 * 1024 * 1024);
+    $sizeBytes = (int) ($upload['size'] ?? 0);
+    if ($sizeBytes <= 0 || $sizeBytes > $maxSize) {
+        throw new RuntimeException('附件大小超出限制 (<= 20MB)。');
+    }
 
-    record_shipment_event((int) $node['shipment_id'], $nodeId, 'NODE_DONE', [
-        'actual_time' => $actualUtc,
-        'completed_by' => $user['id'],
+    $tmpPath = (string) ($upload['tmp_name'] ?? '');
+    if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+        throw new RuntimeException('附件上传失败，请重试。');
+    }
+
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mimeType = $finfo->file($tmpPath) ?: ($upload['type'] ?? 'application/octet-stream');
+    $allowedMime = [
+        'pdf' => ['application/pdf'],
+        'jpg' => ['image/jpeg'],
+        'jpeg' => ['image/jpeg'],
+        'png' => ['image/png'],
+    ];
+    $validMimes = $allowedMime[$extension] ?? [];
+    if (!in_array($mimeType, $validMimes, true)) {
+        throw new RuntimeException('附件类型与内容不匹配，请检查文件。');
+    }
+
+    $hash = hash_file('sha256', $tmpPath);
+    $relativeDir = date('Y/m');
+    $baseDir = rtrim(uploads_directory(), '/');
+    $targetDir = $baseDir . '/' . $relativeDir;
+    ensure_directory($targetDir);
+
+    $randomName = bin2hex(random_bytes(16));
+    $storageRelative = $relativeDir . '/' . $randomName . '.' . $extension;
+    $storagePath = $baseDir . '/' . $storageRelative;
+
+    if (!move_uploaded_file($tmpPath, $storagePath)) {
+        throw new RuntimeException('附件保存失败，请重试。');
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO node_files (node_id, file_name, mime_type, size_bytes, sha256, storage_path, uploaded_by, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime("now"))');
+    $stmt->execute([
+        $node['id'],
+        $filename,
+        $mimeType,
+        $sizeBytes,
+        $hash,
+        $storageRelative,
+        $user['id'],
+    ]);
+    $fileId = (int) $pdo->lastInsertId();
+
+    record_shipment_event((int) $node['shipment_id'], (int) $node['id'], 'EVIDENCE_UPLOADED', [
+        'file_id' => $fileId,
+        'file_name' => $filename,
+        'sha256' => $hash,
+        'uploaded_by' => $user['id'],
     ]);
 
-    $nextStmt = db()->prepare('SELECT * FROM shipment_nodes WHERE shipment_id = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1');
-    $nextStmt->execute([$node['shipment_id'], $node['sort_order']]);
-    $nextNode = $nextStmt->fetch();
-    if ($nextNode && $nextNode['base_type'] === 'previous') {
-        $deadline = (new DateTimeImmutable($actualUtc, new DateTimeZone('UTC')))->modify('+' . (float) $nextNode['sla_hours'] . ' hours');
-        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
-        $remaining = (int) floor(($deadline->getTimestamp() - $now->getTimestamp()) / 60);
-        $status = $remaining < 0 ? 'BREACH' : ($remaining <= $warnMinutes ? 'WARN' : 'OK');
-        $updateNext = db()->prepare('UPDATE shipment_nodes SET deadline_utc = ?, remaining_minutes = ?, sla_status = ?, updated_at = datetime("now") WHERE id = ?');
-        $updateNext->execute([$deadline->format('Y-m-d H:i:s'), $remaining, $status, $nextNode['id']]);
-        record_shipment_event((int) $node['shipment_id'], (int) $nextNode['id'], 'SLA_RECALCULATED', [
-            'trigger' => $nodeId,
-            'deadline' => $deadline->format('Y-m-d H:i:s'),
-            'remaining' => $remaining,
-            'status' => $status,
-        ]);
+    return ['id' => $fileId, 'path' => $storagePath];
+}
+
+function persist_node_signature(PDO $pdo, array $node, array $user, string $signatureValue, string $method): void
+{
+    $method = in_array($method, ['pin', 'draw'], true) ? $method : 'pin';
+    $value = trim($signatureValue);
+    if ($value !== '') {
+        $signer = function_exists('mb_substr') ? mb_substr($value, 0, 120) : substr($value, 0, 120);
+    } else {
+        $signer = $user['display_name'] ?? '';
     }
+    if ($signer === '') {
+        $signer = $user['email'] ?? '签署人';
+    }
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? null;
+    $device = $_SERVER['HTTP_USER_AGENT'] ?? null;
+
+    $stmt = $pdo->prepare('INSERT INTO node_signatures (node_id, user_id, method, signer_name, ip, device, geo_lat, geo_lng, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, datetime("now"))');
+    $stmt->execute([
+        $node['id'],
+        $user['id'],
+        $method,
+        $signer,
+        $ip,
+        $device,
+    ]);
+
+    record_shipment_event((int) $node['shipment_id'], (int) $node['id'], 'SIGNATURE_CAPTURED', [
+        'user_id' => $user['id'],
+        'method' => $method,
+        'signer_name' => $signer,
+        'ip' => $ip,
+    ]);
+}
+
+function download_node_file(int $fileId, array $user): void
+{
+    if ($fileId <= 0) {
+        throw new RuntimeException('附件不存在。', 404);
+    }
+
+    $stmt = db()->prepare('SELECT nf.*, sn.vendor_id, sn.assignee_user_id, sn.shipment_id FROM node_files nf
+        JOIN shipment_nodes sn ON sn.id = nf.node_id WHERE nf.id = ?');
+    $stmt->execute([$fileId]);
+    $file = $stmt->fetch();
+    if (!$file) {
+        throw new RuntimeException('附件不存在。', 404);
+    }
+
+    if ($user['role'] !== 'admin' && !is_node_accessible_to_user($file, $user)) {
+        throw new RuntimeException('无权限下载该附件。', 403);
+    }
+
+    $baseDir = rtrim(uploads_directory(), '/');
+    $storagePath = $baseDir . '/' . ltrim((string) $file['storage_path'], '/');
+    if (!is_file($storagePath)) {
+        throw new RuntimeException('附件文件不存在或已被删除。', 404);
+    }
+
+    header('Content-Type: ' . $file['mime_type']);
+    header('Content-Length: ' . $file['size_bytes']);
+    header('Content-Disposition: attachment; filename="' . rawurlencode($file['file_name']) . '"');
+    header('X-Content-Type-Options: nosniff');
+
+    $handle = fopen($storagePath, 'rb');
+    if ($handle === false) {
+        throw new RuntimeException('附件读取失败。', 500);
+    }
+    while (!feof($handle)) {
+        echo fread($handle, 8192);
+    }
+    fclose($handle);
+
+    record_shipment_event((int) $file['shipment_id'], (int) $file['node_id'], 'EVIDENCE_DOWNLOADED', [
+        'file_id' => $fileId,
+        'downloaded_by' => $user['id'],
+    ]);
 }

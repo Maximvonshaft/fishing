@@ -102,6 +102,58 @@ $nodes = $detail['nodes'];
                                 </div>
                             </div>
                         </div>
+                        <div class="grid gap-4 md:grid-cols-2">
+                            <div class="rounded-2xl border border-slate-200 p-4">
+                                <div class="flex items-center justify-between text-sm font-semibold text-slate-700">
+                                    <span>附件</span>
+                                    <?php if (!empty($node['evidence_required'])): ?>
+                                        <span class="text-xs <?= empty($node['files']) ? 'text-red-600' : 'text-emerald-600' ?>">
+                                            <?= empty($node['files']) ? '缺少必传附件' : '附件齐全' ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </div>
+                                <?php if (!empty($node['files'])): ?>
+                                    <ul class="mt-3 space-y-2 text-sm">
+                                        <?php foreach ($node['files'] as $file): ?>
+                                            <li class="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+                                                <div>
+                                                    <div class="font-medium text-slate-800"><?= htmlspecialchars($file['name']) ?></div>
+                                                    <div class="text-xs text-slate-400">尺寸 <?= htmlspecialchars($file['size_label']) ?> · 指纹 <?= htmlspecialchars($file['sha256_prefix']) ?></div>
+                                                </div>
+                                                <a class="text-brand text-xs hover:underline" href="<?= htmlspecialchars($file['download_url']) ?>">下载</a>
+                                            </li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                <?php else: ?>
+                                    <p class="mt-3 text-sm text-slate-500">暂无附件。</p>
+                                <?php endif; ?>
+                            </div>
+                            <div class="rounded-2xl border border-slate-200 p-4">
+                                <div class="flex items-center justify-between text-sm font-semibold text-slate-700">
+                                    <span>签名</span>
+                                    <?php if (!empty($node['signature_required'])): ?>
+                                        <span class="text-xs <?= empty($node['signatures']) ? 'text-red-600' : 'text-emerald-600' ?>">
+                                            <?= empty($node['signatures']) ? '等待签名' : '已签署' ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </div>
+                                <?php if (!empty($node['signatures'])): ?>
+                                    <ul class="mt-3 space-y-2 text-sm">
+                                        <?php foreach ($node['signatures'] as $signature): ?>
+                                            <li class="rounded-xl bg-slate-50 px-3 py-2">
+                                                <div class="font-medium text-slate-800"><?= htmlspecialchars($signature['signer_name']) ?> <span class="text-xs text-slate-400">(<?= htmlspecialchars(strtoupper($signature['method'])) ?>)</span></div>
+                                                <div class="text-xs text-slate-400 mt-1">账号：<?= htmlspecialchars($signature['display_name']) ?> · 时间：<?= htmlspecialchars(format_datetime($signature['created_at'])) ?></div>
+                                                <?php if (!empty($signature['ip'])): ?>
+                                                    <div class="text-xs text-slate-400">IP：<?= htmlspecialchars($signature['ip']) ?></div>
+                                                <?php endif; ?>
+                                            </li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                <?php else: ?>
+                                    <p class="mt-3 text-sm text-slate-500">暂无签名记录。</p>
+                                <?php endif; ?>
+                            </div>
+                        </div>
                     <?php else: ?>
                         <p class="text-sm text-slate-500">该节点对当前账号只读，无法查看详情。</p>
                     <?php endif; ?>
