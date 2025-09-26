@@ -221,15 +221,21 @@ function flash(string $key, ?string $value = null): ?string
 
 function add_audit_event(?int $actorId, ?int $targetId, string $action, array $payload = []): void
 {
-    $stmt = db()->prepare('INSERT INTO audit_events (actor_user_id, target_user_id, action, ip, user_agent, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime("now"))');
-    $stmt->execute([
-        $actorId,
-        $targetId,
-        $action,
-        $_SERVER['REMOTE_ADDR'] ?? null,
-        $_SERVER['HTTP_USER_AGENT'] ?? null,
-        $payload ? json_encode($payload, JSON_UNESCAPED_UNICODE) : null,
-    ]);
+    try {
+        $stmt = db()->prepare('INSERT INTO audit_events (actor_user_id, target_user_id, action, ip, user_agent, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, datetime("now"))');
+        $stmt->execute([
+            $actorId,
+            $targetId,
+            $action,
+            $_SERVER['REMOTE_ADDR'] ?? null,
+            $_SERVER['HTTP_USER_AGENT'] ?? null,
+            $payload ? json_encode($payload, JSON_UNESCAPED_UNICODE) : null,
+        ]);
+    } catch (\PDOException $e) {
+        error_log('[audit] Unable to persist audit event: ' . $e->getMessage());
+    } catch (\Throwable $e) {
+        error_log('[audit] Unexpected failure while writing audit event: ' . $e->getMessage());
+    }
 }
 
 function password_hash_secure(string $password): string

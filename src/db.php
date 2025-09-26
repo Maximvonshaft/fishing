@@ -14,6 +14,7 @@ use Throwable;
 final class Database
 {
     private static ?PDO $pdo = null;
+    private static bool $schemaChecked = false;
 
     public static function connection(): PDO
     {
@@ -55,8 +56,28 @@ final class Database
         self::$pdo = $pdo;
         Migrations::run($pdo);
         Seeders::run($pdo);
+        self::runSelfChecks($pdo);
 
         return self::$pdo;
+    }
+
+    private static function runSelfChecks(PDO $pdo): void
+    {
+        if (self::$schemaChecked) {
+            return;
+        }
+
+        self::$schemaChecked = true;
+
+        try {
+            $stmt = $pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'audit_events' LIMIT 1");
+            $exists = $stmt !== false && $stmt->fetchColumn() !== false;
+            if (!$exists) {
+                error_log('[bootstrap] Required table audit_events is missing. Run database migrations.');
+            }
+        } catch (Throwable $e) {
+            error_log('[bootstrap] Failed to verify audit_events table: ' . $e->getMessage());
+        }
     }
 }
 
