@@ -87,14 +87,51 @@ function app_script_path(): string
     }
 
     $scriptName = $_SERVER['SCRIPT_NAME'] ?? ($_SERVER['PHP_SELF'] ?? '');
-    if ($scriptName !== '') {
-        if ($scriptName[0] !== '/') {
-            $scriptName = '/' . ltrim($scriptName, '/');
+
+    if ($scriptName === '') {
+        $requestPath = $_SERVER['REQUEST_URI'] ?? '';
+        if ($requestPath !== '') {
+            $path = parse_url($requestPath, PHP_URL_PATH);
+            if (is_string($path) && $path !== '') {
+                if (!str_contains($path, '.php')) {
+                    $path = rtrim($path, '/');
+                    $path = ($path === '' ? '' : $path) . '/index.php';
+                    if ($path[0] !== '/') {
+                        $path = '/' . $path;
+                    }
+                }
+                $scriptName = $path;
+            }
         }
-        $script = $scriptName;
-    } else {
-        $script = '/public/index.php';
     }
+
+    if ($scriptName === '') {
+        $scriptFile = $_SERVER['SCRIPT_FILENAME'] ?? null;
+        $documentRoot = $_SERVER['DOCUMENT_ROOT'] ?? null;
+        if (is_string($scriptFile) && is_string($documentRoot)) {
+            $realScript = realpath($scriptFile) ?: $scriptFile;
+            $realRoot = realpath($documentRoot) ?: $documentRoot;
+            $normalizedScript = str_replace(chr(92), '/', $realScript);
+            $normalizedRoot = str_replace(chr(92), '/', $realRoot);
+            $normalizedRoot = rtrim($normalizedRoot, '/');
+            if ($normalizedRoot === '') {
+                $normalizedRoot = '/';
+            }
+            if (str_starts_with($normalizedScript, $normalizedRoot)) {
+                $scriptName = substr($normalizedScript, strlen($normalizedRoot));
+            }
+        }
+    }
+
+    if ($scriptName === '') {
+        $scriptName = '/index.php';
+    }
+
+    if ($scriptName[0] !== '/') {
+        $scriptName = '/' . ltrim($scriptName, '/');
+    }
+
+    $script = $scriptName;
 
     return $script;
 }
