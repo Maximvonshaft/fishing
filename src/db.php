@@ -241,6 +241,9 @@ final class Migrations
                 device TEXT,
                 geo_lat REAL,
                 geo_lng REAL,
+                image_path TEXT,
+                image_sha256 TEXT,
+                image_bytes INTEGER,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(node_id) REFERENCES shipment_nodes(id) ON DELETE CASCADE,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -311,6 +314,18 @@ final class Migrations
             $pdo->exec("ALTER TABLE shipment_nodes ADD COLUMN signature_required INTEGER NOT NULL DEFAULT 0");
         }
         $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_shipment_sort_unique ON shipment_nodes(shipment_id, sort_order)");
+
+        $signatureCols = $columns('node_signatures');
+        $signatureColNames = array_column($signatureCols, 'name');
+        if (!in_array('image_path', $signatureColNames, true)) {
+            $pdo->exec("ALTER TABLE node_signatures ADD COLUMN image_path TEXT NULL");
+        }
+        if (!in_array('image_sha256', $signatureColNames, true)) {
+            $pdo->exec("ALTER TABLE node_signatures ADD COLUMN image_sha256 TEXT NULL");
+        }
+        if (!in_array('image_bytes', $signatureColNames, true)) {
+            $pdo->exec("ALTER TABLE node_signatures ADD COLUMN image_bytes INTEGER NULL");
+        }
     }
 }
 

@@ -99,6 +99,14 @@ $deadlineLocal = $node['deadline_utc'] ? format_datetime($node['deadline_utc'], 
                                 <?php if (!empty($signature['ip'])): ?>
                                     <div class="text-xs text-slate-400">IP：<?= htmlspecialchars($signature['ip']) ?></div>
                                 <?php endif; ?>
+                                <?php if (!empty($signature['image_url'])): ?>
+                                    <div class="mt-3">
+                                        <img src="<?= htmlspecialchars($signature['image_url']) ?>" alt="签名图像" class="h-24 w-auto max-w-full rounded-lg border border-slate-200 bg-white object-contain">
+                                        <?php if (!empty($signature['image_sha256_prefix'])): ?>
+                                            <div class="text-xs text-slate-400 mt-1">指纹 <?= htmlspecialchars($signature['image_sha256_prefix']) ?></div>
+                                        <?php endif; ?>
+                                    </div>
+                                <?php endif; ?>
                             </li>
                         <?php endforeach; ?>
                     </ul>
@@ -129,14 +137,23 @@ $deadlineLocal = $node['deadline_utc'] ? format_datetime($node['deadline_utc'], 
                 <?php endif; ?>
             </div>
             <div>
-                <label class="block text-sm font-medium text-slate-600" for="signature_value">签名<?= $node['signature_required'] ? ' (必填)' : '' ?></label>
-                <input type="text" id="signature_value" name="signature_value" placeholder="请输入签名姓名或 PIN"
-                       value="<?= htmlspecialchars($user['display_name'] ?? '') ?>"
-                       class="mt-1 block w-full rounded-lg border-slate-300 focus:border-brand focus:ring-brand">
-                <input type="hidden" name="signature_method" value="pin">
+                <label class="block text-sm font-medium text-slate-600">手写签名<?= $node['signature_required'] ? ' (必填)' : '' ?></label>
+                <div class="mt-2 rounded-xl border border-slate-300 bg-white p-3">
+                    <canvas id="signature_canvas"
+                            class="block w-full touch-manipulation"
+                            style="aspect-ratio: 5 / 2; touch-action: none;"
+                            width="900"
+                            height="360"></canvas>
+                    <div class="mt-2 flex items-center justify-between text-xs text-slate-400">
+                        <span>使用鼠标或触控板手写签名，提交时会保存为图像并记录审计信息。</span>
+                        <button type="button" id="signature_clear" class="text-brand hover:underline">清除重写</button>
+                    </div>
+                </div>
+                <input type="hidden" name="signature_draw_data" id="signature_draw_data" value="">
+                <input type="hidden" name="signature_method" value="draw">
                 <p class="text-xs text-slate-400 mt-1">系统会记录账号、IP 与时间，便于审计。</p>
                 <?php if ($node['signature_required'] && empty($node['signatures'])): ?>
-                    <p class="text-xs text-red-500 mt-1">该节点要求签名确认。</p>
+                    <p class="text-xs text-red-500 mt-1">该节点要求完成手写签名。</p>
                 <?php endif; ?>
             </div>
             <button type="submit" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-brand text-white font-medium hover:bg-brand/90">
@@ -145,3 +162,119 @@ $deadlineLocal = $node['deadline_utc'] ? format_datetime($node['deadline_utc'], 
         </form>
     </div>
 </div>
+
+<script>
+(function () {
+    const canvas = document.getElementById('signature_canvas');
+    const clearBtn = document.getElementById('signature_clear');
+    const hiddenInput = document.getElementById('signature_draw_data');
+    const form = document.querySelector('form[action*="node_id=<?= (int) $node['id'] ?>"]') || document.querySelector('form');
+    if (!canvas || !clearBtn || !hiddenInput || !form) {
+        return;
+    }
+
+    const ctx = canvas.getContext('2d');
+    const baseWidth = canvas.width;
+    const baseHeight = canvas.height;
+    const ratio = window.devicePixelRatio || 1;
+    if (ratio !== 1) {
+        canvas.width = baseWidth * ratio;
+        canvas.height = baseHeight * ratio;
+        ctx.scale(ratio, ratio);
+    }
+    canvas.style.width = '100%';
+    canvas.style.height = '';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#1f2937';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, baseWidth, baseHeight);
+    ctx.fillStyle = '#1f2937';
+
+    let drawing = false;
+    let hasStroke = false;
+    let lastPoint = null;
+
+    function pointerPosition(event) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = baseWidth / rect.width;
+        const scaleY = baseHeight / rect.height;
+        return {
+            x: (event.clientX - rect.left) * scaleX,
+            y: (event.clientY - rect.top) * scaleY,
+        };
+    }
+
+    function startDrawing(event) {
+        event.preventDefault();
+        drawing = true;
+        const {x, y} = pointerPosition(event);
+        lastPoint = {x, y};
+        if (typeof canvas.setPointerCapture === 'function') {
+            canvas.setPointerCapture(event.pointerId);
+        }
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    }
+
+    function draw(event) {
+        if (!drawing) {
+            return;
+        }
+        event.preventDefault();
+        const {x, y} = pointerPosition(event);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        hasStroke = true;
+        lastPoint = {x, y};
+    }
+
+    function endDrawing(event) {
+        if (!drawing) {
+            return;
+        }
+        event.preventDefault();
+        drawing = false;
+        if (!hasStroke && lastPoint) {
+            ctx.beginPath();
+            ctx.arc(lastPoint.x, lastPoint.y, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            hasStroke = true;
+        }
+        lastPoint = null;
+        if (event && typeof canvas.releasePointerCapture === 'function') {
+            try {
+                canvas.releasePointerCapture(event.pointerId);
+            } catch (e) {
+                // ignore
+            }
+        }
+        ctx.closePath();
+    }
+
+    canvas.addEventListener('pointerdown', startDrawing);
+    canvas.addEventListener('pointermove', draw);
+    canvas.addEventListener('pointerup', endDrawing);
+    canvas.addEventListener('pointerleave', endDrawing);
+    canvas.addEventListener('pointercancel', endDrawing);
+
+    clearBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, baseWidth, baseHeight);
+        ctx.fillStyle = '#1f2937';
+        hasStroke = false;
+        hiddenInput.value = '';
+    });
+
+    form.addEventListener('submit', function () {
+        if (hasStroke) {
+            hiddenInput.value = canvas.toDataURL('image/png');
+        } else {
+            hiddenInput.value = '';
+        }
+    });
+})();
+</script>

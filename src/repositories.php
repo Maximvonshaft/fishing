@@ -381,6 +381,10 @@ function get_node_signatures(int $nodeId): array
     $rows = $stmt->fetchAll();
 
     return array_map(static function (array $row): array {
+        $imageUrl = null;
+        if (!empty($row['image_path'])) {
+            $imageUrl = route('signatures.render', ['signature_id' => (int) $row['id']]);
+        }
         return [
             'id' => (int) $row['id'],
             'user_id' => (int) $row['user_id'],
@@ -392,6 +396,9 @@ function get_node_signatures(int $nodeId): array
             'geo_lat' => $row['geo_lat'],
             'geo_lng' => $row['geo_lng'],
             'created_at' => $row['created_at'],
+            'image_url' => $imageUrl,
+            'image_sha256' => $row['image_sha256'] ?? null,
+            'image_sha256_prefix' => isset($row['image_sha256']) ? substr($row['image_sha256'], 0, 8) : null,
         ];
     }, $rows);
 }

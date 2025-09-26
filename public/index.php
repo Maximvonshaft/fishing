@@ -26,6 +26,18 @@ if ($action === 'download_file') {
     exit;
 }
 
+if ($action === 'render_signature') {
+    $user = require_login();
+    $signatureId = (int) ($_GET['signature_id'] ?? 0);
+    try {
+        render_signature_image($signatureId, $user);
+    } catch (RuntimeException $e) {
+        http_response_code($e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 404);
+        echo $e->getMessage();
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     handle_post_action($action);
 }
@@ -476,10 +488,15 @@ function complete_node(int $nodeId, string $actualTime, array $user, array $file
             $storedFiles[] = persist_node_file($pdo, $node, $upload, $user);
         }
 
-        $signatureValue = trim((string) ($post['signature_value'] ?? ''));
-        $signatureMethod = $post['signature_method'] ?? 'pin';
-        if ($signatureValue !== '') {
-            persist_node_signature($pdo, $node, $user, $signatureValue, $signatureMethod);
+        $signatureMethod = $post['signature_method'] ?? 'draw';
+        $signaturePayload = '';
+        if ($signatureMethod === 'draw') {
+            $signaturePayload = trim((string) ($post['signature_draw_data'] ?? ''));
+        } else {
+            $signaturePayload = trim((string) ($post['signature_value'] ?? ''));
+        }
+        if ($signaturePayload !== '') {
+            persist_node_signature($pdo, $node, $user, $signaturePayload, $signatureMethod);
         }
 
         if ((int) $node['evidence_required'] === 1 && count_node_files($nodeId, $pdo) === 0) {
@@ -614,22 +631,59 @@ function persist_node_file(PDO $pdo, array $node, array $upload, array $user): a
 
 function persist_node_signature(PDO $pdo, array $node, array $user, string $signatureValue, string $method): void
 {
-    $method = in_array($method, ['pin', 'draw'], true) ? $method : 'pin';
-    $value = trim($signatureValue);
-    if ($value !== '') {
-        $signer = function_exists('mb_substr') ? mb_substr($value, 0, 120) : substr($value, 0, 120);
-    } else {
-        $signer = $user['display_name'] ?? '';
-    }
-    if ($signer === '') {
-        $signer = $user['email'] ?? '签署人';
-    }
-
+    $method = in_array($method, ['pin', 'draw'], true) ? $method : 'draw';
     $ip = $_SERVER['REMOTE_ADDR'] ?? null;
     $device = $_SERVER['HTTP_USER_AGENT'] ?? null;
+    $signer = $user['display_name'] ?? ($user['email'] ?? '签署人');
+    $imagePath = null;
+    $imageSha = null;
+    $imageBytes = null;
 
-    $stmt = $pdo->prepare('INSERT INTO node_signatures (node_id, user_id, method, signer_name, ip, device, geo_lat, geo_lng, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, datetime("now"))');
+    if ($method === 'draw') {
+        $payload = trim($signatureValue);
+        if ($payload === '') {
+            throw new RuntimeException('请在签名板内手写签名后再提交。');
+        }
+        if (!str_starts_with($payload, 'data:image/png;base64,')) {
+            throw new RuntimeException('签名数据格式无效，请重新签署。');
+        }
+        $base64 = substr($payload, strlen('data:image/png;base64,'));
+        $binary = base64_decode($base64, true);
+        if ($binary === false || $binary === '') {
+            throw new RuntimeException('签名数据无法解析，请重新签署。');
+        }
+        if (strlen($binary) > (int) config('uploads.max_size', 20 * 1024 * 1024)) {
+            throw new RuntimeException('签名图像超出大小限制，请重试。');
+        }
+        if (strlen($binary) < 256) {
+            throw new RuntimeException('检测到签名笔画过少，请重新签署。');
+        }
+
+        $hash = hash('sha256', $binary);
+        $relativeDir = 'signatures/' . date('Y/m');
+        $baseDir = rtrim(uploads_directory(), '/');
+        $targetDir = $baseDir . '/' . $relativeDir;
+        ensure_directory($targetDir);
+
+        $filename = bin2hex(random_bytes(16)) . '.png';
+        $storageRelative = $relativeDir . '/' . $filename;
+        $storagePath = $baseDir . '/' . $storageRelative;
+        if (file_put_contents($storagePath, $binary) === false) {
+            throw new RuntimeException('签名保存失败，请重试。');
+        }
+
+        $imagePath = $storageRelative;
+        $imageSha = $hash;
+        $imageBytes = strlen($binary);
+    } else {
+        $value = trim($signatureValue);
+        if ($value !== '') {
+            $signer = function_exists('mb_substr') ? mb_substr($value, 0, 120) : substr($value, 0, 120);
+        }
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO node_signatures (node_id, user_id, method, signer_name, ip, device, geo_lat, geo_lng, image_path, image_sha256, image_bytes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, datetime("now"))');
     $stmt->execute([
         $node['id'],
         $user['id'],
@@ -637,6 +691,9 @@ function persist_node_signature(PDO $pdo, array $node, array $user, string $sign
         $signer,
         $ip,
         $device,
+        $imagePath,
+        $imageSha,
+        $imageBytes,
     ]);
 
     record_shipment_event((int) $node['shipment_id'], (int) $node['id'], 'SIGNATURE_CAPTURED', [
@@ -644,6 +701,7 @@ function persist_node_signature(PDO $pdo, array $node, array $user, string $sign
         'method' => $method,
         'signer_name' => $signer,
         'ip' => $ip,
+        'image_sha256' => $imageSha,
     ]);
 }
 
@@ -688,5 +746,56 @@ function download_node_file(int $fileId, array $user): void
     record_shipment_event((int) $file['shipment_id'], (int) $file['node_id'], 'EVIDENCE_DOWNLOADED', [
         'file_id' => $fileId,
         'downloaded_by' => $user['id'],
+    ]);
+}
+
+function render_signature_image(int $signatureId, array $user): void
+{
+    if ($signatureId <= 0) {
+        throw new RuntimeException('签名不存在。', 404);
+    }
+
+    $stmt = db()->prepare('SELECT ns.*, sn.shipment_id FROM node_signatures ns JOIN shipment_nodes sn ON sn.id = ns.node_id WHERE ns.id = ?');
+    $stmt->execute([$signatureId]);
+    $signature = $stmt->fetch();
+    if (!$signature) {
+        throw new RuntimeException('签名不存在。', 404);
+    }
+
+    if ($user['role'] !== 'admin') {
+        $node = fetch_node_for_user((int) $signature['node_id'], $user);
+        if (!$node) {
+            throw new RuntimeException('无权访问该签名。', 403);
+        }
+    }
+
+    $imagePath = $signature['image_path'] ?? null;
+    if (!$imagePath) {
+        throw new RuntimeException('该签名没有图像记录。', 404);
+    }
+
+    $fullPath = rtrim(uploads_directory(), '/') . '/' . ltrim((string) $imagePath, '/');
+    if (!is_file($fullPath)) {
+        throw new RuntimeException('签名文件不存在。', 404);
+    }
+
+    header('Content-Type: image/png');
+    header('Content-Length: ' . (string) filesize($fullPath));
+    header('Content-Disposition: inline; filename="signature-' . $signatureId . '.png"');
+    header('Cache-Control: private, max-age=31536000');
+    header('X-Content-Type-Options: nosniff');
+
+    $handle = fopen($fullPath, 'rb');
+    if ($handle === false) {
+        throw new RuntimeException('签名读取失败。', 500);
+    }
+    while (!feof($handle)) {
+        echo fread($handle, 8192);
+    }
+    fclose($handle);
+
+    record_shipment_event((int) $signature['shipment_id'], (int) $signature['node_id'], 'SIGNATURE_VIEWED', [
+        'signature_id' => $signatureId,
+        'viewed_by' => $user['id'],
     ]);
 }

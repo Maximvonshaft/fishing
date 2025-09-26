@@ -241,6 +241,7 @@ function route(string $name, array $params = []): string
         'tasks.show' => 'node',
         'auth.logout' => ['action' => 'logout'],
         'files.download' => ['action' => 'download_file'],
+        'signatures.render' => ['action' => 'render_signature'],
     ];
 
     $target = $map[$name] ?? 'projects';

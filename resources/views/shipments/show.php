@@ -146,6 +146,14 @@ $nodes = $detail['nodes'];
                                                 <?php if (!empty($signature['ip'])): ?>
                                                     <div class="text-xs text-slate-400">IP：<?= htmlspecialchars($signature['ip']) ?></div>
                                                 <?php endif; ?>
+                                                <?php if (!empty($signature['image_url'])): ?>
+                                                    <div class="mt-3">
+                                                        <img src="<?= htmlspecialchars($signature['image_url']) ?>" alt="签名图像" class="h-24 w-auto max-w-full rounded-lg border border-slate-200 bg-white object-contain">
+                                                        <?php if (!empty($signature['image_sha256_prefix'])): ?>
+                                                            <div class="text-xs text-slate-400 mt-1">指纹 <?= htmlspecialchars($signature['image_sha256_prefix']) ?></div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                <?php endif; ?>
                                             </li>
                                         <?php endforeach; ?>
                                     </ul>
