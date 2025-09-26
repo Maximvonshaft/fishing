@@ -113,6 +113,33 @@ final class Migrations
                 FOREIGN KEY(vendor_id) REFERENCES vendors(id) ON DELETE SET NULL
             )",
             "CREATE INDEX IF NOT EXISTS idx_users_vendor_id ON users(vendor_id)",
+            // countries & templates
+            "CREATE TABLE IF NOT EXISTS countries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+            "CREATE TABLE IF NOT EXISTS country_nodes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                country_id INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                vendor_id INTEGER NOT NULL,
+                default_assignee_user_id INTEGER NULL,
+                base_type TEXT NOT NULL,
+                sla_hours REAL NOT NULL DEFAULT 0,
+                evidence_required INTEGER NOT NULL DEFAULT 0,
+                signature_required INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(country_id, sort_order),
+                FOREIGN KEY(country_id) REFERENCES countries(id) ON DELETE CASCADE,
+                FOREIGN KEY(vendor_id) REFERENCES vendors(id) ON DELETE CASCADE,
+                FOREIGN KEY(default_assignee_user_id) REFERENCES users(id) ON DELETE SET NULL
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_country_nodes_vendor ON country_nodes(vendor_id)",
             // login attempts
             "CREATE TABLE IF NOT EXISTS login_attempts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,22 +177,29 @@ final class Migrations
             // shipments
             "CREATE TABLE IF NOT EXISTS shipments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                country TEXT NOT NULL,
+                country_id INTEGER NOT NULL,
                 code TEXT NOT NULL,
                 origin TEXT,
-                eta_dest_airport TEXT,
+                eta_dest_airport TEXT NOT NULL,
+                meta_json TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                UNIQUE(country, code)
+                UNIQUE(country_id, code),
+                FOREIGN KEY(country_id) REFERENCES countries(id) ON DELETE CASCADE
             )",
             // shipment nodes (milestones)
             "CREATE TABLE IF NOT EXISTS shipment_nodes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 shipment_id INTEGER NOT NULL,
+                country_node_id INTEGER NULL,
                 name TEXT NOT NULL,
                 sort_order INTEGER NOT NULL,
                 vendor_id INTEGER NOT NULL,
                 assignee_user_id INTEGER NULL,
+                base_type TEXT NOT NULL,
+                sla_hours REAL NOT NULL DEFAULT 0,
+                evidence_required INTEGER NOT NULL DEFAULT 0,
+                signature_required INTEGER NOT NULL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'PENDING',
                 deadline_utc TEXT,
                 remaining_minutes INTEGER,
@@ -174,8 +208,10 @@ final class Migrations
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(shipment_id) REFERENCES shipments(id) ON DELETE CASCADE,
+                FOREIGN KEY(country_node_id) REFERENCES country_nodes(id) ON DELETE SET NULL,
                 FOREIGN KEY(vendor_id) REFERENCES vendors(id) ON DELETE CASCADE,
-                FOREIGN KEY(assignee_user_id) REFERENCES users(id) ON DELETE SET NULL
+                FOREIGN KEY(assignee_user_id) REFERENCES users(id) ON DELETE SET NULL,
+                UNIQUE(shipment_id, sort_order)
             )",
             "CREATE INDEX IF NOT EXISTS idx_nodes_shipment_sort ON shipment_nodes(shipment_id, sort_order)",
             "CREATE INDEX IF NOT EXISTS idx_nodes_vendor_status ON shipment_nodes(vendor_id, status)",
@@ -208,12 +244,73 @@ final class Migrations
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(node_id) REFERENCES shipment_nodes(id) ON DELETE CASCADE,
                 FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
-            )"
+            )",
+            // shipment events
+            "CREATE TABLE IF NOT EXISTS shipment_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shipment_id INTEGER NOT NULL,
+                node_id INTEGER NULL,
+                event_type TEXT NOT NULL,
+                payload_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(shipment_id) REFERENCES shipments(id) ON DELETE CASCADE,
+                FOREIGN KEY(node_id) REFERENCES shipment_nodes(id) ON DELETE SET NULL
+            )",
+            "CREATE INDEX IF NOT EXISTS idx_shipment_events_shipment ON shipment_events(shipment_id, created_at)"
         ];
 
         foreach ($queries as $sql) {
             $pdo->exec($sql);
         }
+
+        self::ensureColumns($pdo);
+    }
+
+    private static function ensureColumns(PDO $pdo): void
+    {
+        $columns = static fn(string $table): array => $pdo->query('PRAGMA table_info(' . $table . ')')->fetchAll(PDO::FETCH_ASSOC);
+
+        $hasCountryId = false;
+        foreach ($columns('shipments') as $col) {
+            if ($col['name'] === 'country_id') {
+                $hasCountryId = true;
+            }
+        }
+        if (!$hasCountryId) {
+            $pdo->exec("ALTER TABLE shipments ADD COLUMN country_id INTEGER NULL REFERENCES countries(id) ON DELETE CASCADE");
+            $pdo->exec("UPDATE shipments SET country_id = NULL");
+        }
+
+        $hasMeta = false;
+        foreach ($columns('shipments') as $col) {
+            if ($col['name'] === 'meta_json') {
+                $hasMeta = true;
+            }
+        }
+        if (!$hasMeta) {
+            $pdo->exec("ALTER TABLE shipments ADD COLUMN meta_json TEXT NULL");
+        }
+
+        $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_shipments_country_code ON shipments(country_id, code)");
+
+        $nodeCols = $columns('shipment_nodes');
+        $nodeColNames = array_column($nodeCols, 'name');
+        if (!in_array('country_node_id', $nodeColNames, true)) {
+            $pdo->exec("ALTER TABLE shipment_nodes ADD COLUMN country_node_id INTEGER NULL REFERENCES country_nodes(id) ON DELETE SET NULL");
+        }
+        if (!in_array('base_type', $nodeColNames, true)) {
+            $pdo->exec("ALTER TABLE shipment_nodes ADD COLUMN base_type TEXT NOT NULL DEFAULT 'eta'");
+        }
+        if (!in_array('sla_hours', $nodeColNames, true)) {
+            $pdo->exec("ALTER TABLE shipment_nodes ADD COLUMN sla_hours REAL NOT NULL DEFAULT 0");
+        }
+        if (!in_array('evidence_required', $nodeColNames, true)) {
+            $pdo->exec("ALTER TABLE shipment_nodes ADD COLUMN evidence_required INTEGER NOT NULL DEFAULT 0");
+        }
+        if (!in_array('signature_required', $nodeColNames, true)) {
+            $pdo->exec("ALTER TABLE shipment_nodes ADD COLUMN signature_required INTEGER NOT NULL DEFAULT 0");
+        }
+        $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_shipment_sort_unique ON shipment_nodes(shipment_id, sort_order)");
     }
 }
 
@@ -240,7 +337,6 @@ final class Seeders
             $adminPassword = password_hash('Admin#1234', PASSWORD_DEFAULT);
             $pdo->prepare('INSERT INTO users (vendor_id, email, display_name, password_hash, role, active, force_password_reset, created_at, updated_at) VALUES (NULL, ?, ?, ?, ?, 1, 1, ?, ?)')
                 ->execute(['admin@example.com', 'System Admin', $adminPassword, 'admin', $now, $now]);
-            $adminId = (int) $pdo->lastInsertId();
 
             $vendorPassword = password_hash('Vendor#1234', PASSWORD_DEFAULT);
             $pdo->prepare('INSERT INTO users (vendor_id, email, display_name, password_hash, role, active, force_password_reset, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)')
@@ -251,26 +347,88 @@ final class Seeders
                 ->execute([$vendorBId, 'b.operator@example.com', 'Eagle Operator', $vendorPassword, 'vendor', $now, $now]);
             $vendorBUserId = (int) $pdo->lastInsertId();
 
-            // Seed shipments and nodes
-            $pdo->prepare('INSERT INTO shipments (country, code, origin, eta_dest_airport, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-                ->execute(['ALB', 'ALB-2024-001', 'PVG', gmdate('Y-m-d H:i:s', strtotime('+1 day')), $now, $now]);
+            // Seed country and template
+            $pdo->prepare('INSERT INTO countries (code, name, created_at, updated_at) VALUES (?, ?, ?, ?)')
+                ->execute(['ALB', 'Albania', $now, $now]);
+            $countryId = (int) $pdo->lastInsertId();
+
+            $insertTemplate = $pdo->prepare('INSERT INTO country_nodes (country_id, sort_order, name, vendor_id, default_assignee_user_id, base_type, sla_hours, evidence_required, signature_required, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            $insertTemplate->execute([$countryId, 1, 'NOA Issued', $vendorAId, $vendorAUserId, 'eta', 0, 1, 1, $now, $now]);
+            $templateNode1 = (int) $pdo->lastInsertId();
+            $insertTemplate->execute([$countryId, 2, 'Customs Clearance Start', $vendorAId, $vendorAUserId, 'previous', 4, 0, 0, $now, $now]);
+            $templateNode2 = (int) $pdo->lastInsertId();
+            $insertTemplate->execute([$countryId, 3, 'BBL Handover Complete', $vendorBId, $vendorBUserId, 'previous', 12, 1, 1, $now, $now]);
+            $templateNode3 = (int) $pdo->lastInsertId();
+
+            // Seed shipments based on template
+            $createShipment = $pdo->prepare('INSERT INTO shipments (country_id, code, origin, eta_dest_airport, meta_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+            $shipmentEta1 = gmdate('Y-m-d H:i:s', strtotime('+1 day'));
+            $createShipment->execute([$countryId, 'ALB-2024-001', 'PVG', $shipmentEta1, json_encode(['notes' => 'Demo shipment 1']), $now, $now]);
             $shipment1 = (int) $pdo->lastInsertId();
 
-            $pdo->prepare('INSERT INTO shipments (country, code, origin, eta_dest_airport, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
-                ->execute(['ALB', 'ALB-2024-002', 'TIA', gmdate('Y-m-d H:i:s', strtotime('+2 days')), $now, $now]);
+            $shipmentEta2 = gmdate('Y-m-d H:i:s', strtotime('+2 days'));
+            $createShipment->execute([$countryId, 'ALB-2024-002', 'TIA', $shipmentEta2, json_encode(['notes' => 'Demo shipment 2']), $now, $now]);
             $shipment2 = (int) $pdo->lastInsertId();
 
-            $insertNode = $pdo->prepare('INSERT INTO shipment_nodes (shipment_id, name, sort_order, vendor_id, assignee_user_id, status, deadline_utc, remaining_minutes, sla_status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            self::seedShipmentNodes($pdo, $shipment1, $shipmentEta1, $now, [
+                ['id' => $templateNode1, 'sort_order' => 1, 'name' => 'NOA Issued', 'vendor_id' => $vendorAId, 'assignee' => $vendorAUserId, 'base_type' => 'eta', 'sla_hours' => 0, 'evidence_required' => 1, 'signature_required' => 1],
+                ['id' => $templateNode2, 'sort_order' => 2, 'name' => 'Customs Clearance Start', 'vendor_id' => $vendorAId, 'assignee' => $vendorAUserId, 'base_type' => 'previous', 'sla_hours' => 4, 'evidence_required' => 0, 'signature_required' => 0],
+                ['id' => $templateNode3, 'sort_order' => 3, 'name' => 'BBL Handover Complete', 'vendor_id' => $vendorBId, 'assignee' => $vendorBUserId, 'base_type' => 'previous', 'sla_hours' => 12, 'evidence_required' => 1, 'signature_required' => 1],
+            ]);
 
-            $deadline1 = gmdate('Y-m-d H:i:s', strtotime('+6 hours'));
-            $insertNode->execute([$shipment1, 'NOA Issued', 1, $vendorAId, $vendorAUserId, 'PENDING', $deadline1, 360, 'OK', $now, $now]);
-            $insertNode->execute([$shipment1, 'BBL Handover', 2, $vendorAId, null, 'PENDING', gmdate('Y-m-d H:i:s', strtotime('+12 hours')), 720, 'OK', $now, $now]);
-            $insertNode->execute([$shipment2, 'Customs Inspection', 1, $vendorBId, $vendorBUserId, 'PENDING', gmdate('Y-m-d H:i:s', strtotime('+8 hours')), 480, 'WARN', $now, $now]);
+            self::seedShipmentNodes($pdo, $shipment2, $shipmentEta2, $now, [
+                ['id' => $templateNode1, 'sort_order' => 1, 'name' => 'NOA Issued', 'vendor_id' => $vendorAId, 'assignee' => $vendorAUserId, 'base_type' => 'eta', 'sla_hours' => 0, 'evidence_required' => 1, 'signature_required' => 1],
+                ['id' => $templateNode2, 'sort_order' => 2, 'name' => 'Customs Clearance Start', 'vendor_id' => $vendorAId, 'assignee' => $vendorAUserId, 'base_type' => 'previous', 'sla_hours' => 4, 'evidence_required' => 0, 'signature_required' => 0],
+                ['id' => $templateNode3, 'sort_order' => 3, 'name' => 'BBL Handover Complete', 'vendor_id' => $vendorBId, 'assignee' => $vendorBUserId, 'base_type' => 'previous', 'sla_hours' => 12, 'evidence_required' => 1, 'signature_required' => 1],
+            ]);
 
             $pdo->commit();
         } catch (Throwable $e) {
             $pdo->rollBack();
             throw $e;
         }
+    }
+
+    private static function seedShipmentNodes(PDO $pdo, int $shipmentId, string $eta, string $now, array $templateNodes): void
+    {
+        $warnMinutes = (int) (require __DIR__ . '/../config/env.php')['app']['warn_minutes'];
+        $insert = $pdo->prepare('INSERT INTO shipment_nodes (shipment_id, country_node_id, name, sort_order, vendor_id, assignee_user_id, base_type, sla_hours, evidence_required, signature_required, status, deadline_utc, remaining_minutes, sla_status, actual_time, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+
+        foreach ($templateNodes as $node) {
+            [$deadline, $remaining, $status] = self::initialSla($node['base_type'], (float) $node['sla_hours'], $eta, $now, $warnMinutes);
+            $insert->execute([
+                $shipmentId,
+                $node['id'],
+                $node['name'],
+                $node['sort_order'],
+                $node['vendor_id'],
+                $node['assignee'],
+                $node['base_type'],
+                $node['sla_hours'],
+                $node['evidence_required'],
+                $node['signature_required'],
+                'PENDING',
+                $deadline,
+                $remaining,
+                $status,
+                null,
+                $now,
+                $now,
+            ]);
+        }
+    }
+
+    private static function initialSla(string $baseType, float $slaHours, string $eta, string $now, int $warnMinutes): array
+    {
+        $nowDt = new \DateTimeImmutable($now, new \DateTimeZone('UTC'));
+        if (in_array($baseType, ['eta', 'creation'], true)) {
+            $start = $baseType === 'eta' ? $eta : $now;
+            $deadline = (new \DateTimeImmutable($start, new \DateTimeZone('UTC')))->modify('+' . $slaHours . ' hours');
+            $remaining = (int) floor(($deadline->getTimestamp() - $nowDt->getTimestamp()) / 60);
+            $status = $remaining < 0 ? 'BREACH' : ($remaining <= $warnMinutes ? 'WARN' : 'OK');
+            return [$deadline->format('Y-m-d H:i:s'), $remaining, $status];
+        }
+
+        return [null, null, 'NA'];
     }
 }

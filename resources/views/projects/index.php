@@ -23,6 +23,22 @@
             </a>
         </div>
     </div>
+    <div class="px-6 pb-6">
+        <form method="post" action="<?= htmlspecialchars(route('projects.index')) ?>" class="bg-slate-50 border border-dashed border-slate-200 rounded-2xl p-4 flex flex-wrap items-end gap-4">
+            <input type="hidden" name="_action" value="country_create">
+            <input type="hidden" name="_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+            <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">国家代码</label>
+                <input name="code" maxlength="8" required class="rounded-lg border-slate-300 focus:border-brand focus:ring-brand text-sm" placeholder="ALB">
+            </div>
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">国家名称</label>
+                <input name="name" required class="w-full rounded-lg border-slate-300 focus:border-brand focus:ring-brand text-sm" placeholder="Albania">
+            </div>
+            <button type="submit" class="px-4 py-2 bg-brand text-white rounded-lg text-sm shadow-sm">新增国家</button>
+            <p class="text-xs text-slate-500">国家代码建议使用 2-8 位大写字母或数字，保存后可在模板页配置节点。</p>
+        </form>
+    </div>
     <div class="grid gap-4 p-6 md:grid-cols-2 xl:grid-cols-3">
         <?php foreach ($projects as $project): ?>
             <a href="<?= route('shipments.index', ['country' => $project['code']]) ?>" class="p-5 border border-slate-200 rounded-2xl hover:border-brand/50 hover:shadow transition bg-white flex flex-col gap-4">

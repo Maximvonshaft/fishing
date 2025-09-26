@@ -46,13 +46,40 @@ switch ($page) {
             'user' => $user,
         ]);
         break;
+    case 'templates':
+        require_role(['admin']);
+        $countries = get_countries_for_select();
+        $selectedId = isset($_GET['country_id']) ? (int) $_GET['country_id'] : null;
+        if ($selectedId === null && !empty($countries)) {
+            $selectedId = (int) $countries[0]['id'];
+        }
+        $selectedCountry = $selectedId ? get_country($selectedId) : null;
+        $nodes = $selectedCountry ? get_country_nodes($selectedCountry['id']) : [];
+        $vendors = db()->query('SELECT id, name FROM vendors WHERE active = 1 ORDER BY name')->fetchAll();
+        $vendorUsers = db()->query('SELECT id, display_name, vendor_id FROM users WHERE active = 1 ORDER BY display_name')->fetchAll();
+        view('templates.index', [
+            'title' => '模板配置',
+            'countries' => $countries,
+            'selectedCountry' => $selectedCountry,
+            'nodes' => $nodes,
+            'vendors' => $vendors,
+            'vendorUsers' => $vendorUsers,
+            'user' => $user,
+        ]);
+        break;
     case 'shipments':
         require_role(['admin']);
         $country = $_GET['country'] ?? null;
+        $filters = [
+            'status' => $_GET['status'] ?? null,
+            'q' => $_GET['q'] ?? null,
+        ];
         view('shipments.index', [
             'title' => '批次列表',
-            'shipments' => get_shipments($country),
+            'shipments' => get_shipments($country, $filters),
             'selectedProject' => $country,
+            'filters' => $filters,
+            'countries' => get_countries_for_select(),
             'user' => $user,
         ]);
         break;
@@ -170,6 +197,16 @@ function handle_post_action(?string $action): void
             flash('success', '密码更新成功');
             redirect($user['role'] === 'vendor' ? route('tasks.index') : route('projects.index'));
             break;
+        case 'country_create':
+            require_role(['admin']);
+            try {
+                create_country($_POST['code'] ?? '', $_POST['name'] ?? '');
+                flash('success', '国家创建成功');
+            } catch (RuntimeException $e) {
+                flash('error', $e->getMessage());
+            }
+            redirect(route('projects.index'));
+            break;
         case 'vendor_create':
             $user = require_role(['admin']);
             $name = trim($_POST['name'] ?? '');
@@ -200,6 +237,21 @@ function handle_post_action(?string $action): void
             add_audit_event($user['id'], null, 'VENDOR_TOGGLED', ['vendor_id' => $vendorId, 'active' => $active]);
             flash('success', '状态已更新');
             redirect(route('vendors.manage'));
+            break;
+        case 'country_nodes_save':
+            require_role(['admin']);
+            $countryId = (int) ($_POST['country_id'] ?? 0);
+            $nodes = $_POST['nodes'] ?? [];
+            if (!is_array($nodes)) {
+                $nodes = [];
+            }
+            try {
+                save_country_nodes($countryId, $nodes);
+                flash('success', '模板已保存');
+            } catch (RuntimeException $e) {
+                flash('error', $e->getMessage());
+            }
+            redirect(route('templates.index', ['country_id' => $countryId]));
             break;
         case 'user_create':
             $user = require_role(['admin']);
@@ -264,6 +316,32 @@ function handle_post_action(?string $action): void
             flash('success', '临时密码：' . $tempPassword);
             redirect(route('users.manage'));
             break;
+        case 'shipment_create':
+            require_role(['admin']);
+            $payload = [
+                'country_id' => (int) ($_POST['country_id'] ?? 0),
+                'code' => $_POST['code'] ?? '',
+                'origin' => $_POST['origin'] ?? null,
+                'eta_dest_airport' => $_POST['eta_dest_airport'] ?? '',
+            ];
+            $remarks = trim((string) ($_POST['remarks'] ?? ''));
+            if ($remarks !== '') {
+                $payload['meta'] = ['remarks' => $remarks];
+            }
+            try {
+                $shipmentId = create_shipment($payload, $user['id']);
+                flash('success', '批次创建成功');
+                if (!empty($_POST['open_detail'])) {
+                    redirect(route('shipments.show', ['id' => $shipmentId]));
+                }
+                $country = get_country($payload['country_id']);
+                $countryCode = $country ? $country['code'] : null;
+                redirect(route('shipments.index', $countryCode ? ['country' => $countryCode] : []));
+            } catch (RuntimeException $e) {
+                flash('error', $e->getMessage());
+                redirect(route('shipments.index'));
+            }
+            break;
         case 'profile_update':
             $user = require_login();
             $display = trim($_POST['display_name'] ?? '');
@@ -309,18 +387,24 @@ function handle_post_action(?string $action): void
 
 function fetch_node_for_user(int $nodeId, array $user): ?array
 {
-    $stmt = db()->prepare('SELECT sn.*, s.country, s.code, v.name AS vendor_name FROM shipment_nodes sn JOIN shipments s ON s.id = sn.shipment_id JOIN vendors v ON v.id = sn.vendor_id WHERE sn.id = ?');
+    $stmt = db()->prepare('SELECT sn.*, s.code AS shipment_code, s.eta_dest_airport, s.created_at AS shipment_created_at, c.code AS country_code, v.name AS vendor_name
+        FROM shipment_nodes sn
+        JOIN shipments s ON s.id = sn.shipment_id
+        JOIN countries c ON c.id = s.country_id
+        JOIN vendors v ON v.id = sn.vendor_id
+        WHERE sn.id = ?');
     $stmt->execute([$nodeId]);
     $node = $stmt->fetch();
     if (!$node) {
         return null;
     }
 
-    if (!is_node_accessible_to_user($node, $user)) {
-        if ($user['role'] !== 'admin') {
-            return null;
-        }
+    if (!is_node_accessible_to_user($node, $user) && $user['role'] !== 'admin') {
+        return null;
     }
+
+    $node['code'] = $node['shipment_code'];
+    $node['country'] = $node['country_code'] ?? '';
 
     return $node;
 }
@@ -344,7 +428,6 @@ function complete_node(int $nodeId, string $actualTime, array $user): void
         exit;
     }
 
-    // check previous node completion
     $prevStmt = db()->prepare('SELECT status FROM shipment_nodes WHERE shipment_id = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1');
     $prevStmt->execute([$node['shipment_id'], $node['sort_order']]);
     $previous = $prevStmt->fetch();
@@ -355,13 +438,48 @@ function complete_node(int $nodeId, string $actualTime, array $user): void
     }
 
     try {
-        $dt = DateTimeImmutable::createFromFormat(DateTimeInterface::ATOM, $actualTime) ?: new DateTimeImmutable($actualTime ?: 'now', new DateTimeZone('UTC'));
-    } catch (\Exception $e) {
+        $dt = new DateTimeImmutable($actualTime ?: 'now', new DateTimeZone('UTC'));
+    } catch (Throwable $e) {
         http_response_code(422);
         echo '时间格式错误';
         exit;
     }
-    $stmt = db()->prepare('UPDATE shipment_nodes SET status = "DONE", actual_time = ?, updated_at = datetime("now") WHERE id = ?');
-    $stmt->execute([$dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s'), $nodeId]);
-    add_audit_event($user['id'], null, 'NODE_DONE', ['node_id' => $nodeId]);
+
+    $actualUtc = $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+    $warnMinutes = (int) config('app.warn_minutes', 120);
+    $newSlaStatus = $node['sla_status'];
+    $remainingAfter = $node['remaining_minutes'];
+
+    if (!empty($node['deadline_utc'])) {
+        $deadline = new DateTimeImmutable($node['deadline_utc'], new DateTimeZone('UTC'));
+        $actual = new DateTimeImmutable($actualUtc, new DateTimeZone('UTC'));
+        $remainingAfter = (int) floor(($deadline->getTimestamp() - $actual->getTimestamp()) / 60);
+        $newSlaStatus = $remainingAfter < 0 ? 'BREACH' : ($remainingAfter <= $warnMinutes ? 'WARN' : 'OK');
+    }
+
+    $update = db()->prepare('UPDATE shipment_nodes SET status = "DONE", actual_time = ?, remaining_minutes = ?, sla_status = ?, updated_at = datetime("now") WHERE id = ?');
+    $update->execute([$actualUtc, $remainingAfter, $newSlaStatus, $nodeId]);
+
+    record_shipment_event((int) $node['shipment_id'], $nodeId, 'NODE_DONE', [
+        'actual_time' => $actualUtc,
+        'completed_by' => $user['id'],
+    ]);
+
+    $nextStmt = db()->prepare('SELECT * FROM shipment_nodes WHERE shipment_id = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1');
+    $nextStmt->execute([$node['shipment_id'], $node['sort_order']]);
+    $nextNode = $nextStmt->fetch();
+    if ($nextNode && $nextNode['base_type'] === 'previous') {
+        $deadline = (new DateTimeImmutable($actualUtc, new DateTimeZone('UTC')))->modify('+' . (float) $nextNode['sla_hours'] . ' hours');
+        $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+        $remaining = (int) floor(($deadline->getTimestamp() - $now->getTimestamp()) / 60);
+        $status = $remaining < 0 ? 'BREACH' : ($remaining <= $warnMinutes ? 'WARN' : 'OK');
+        $updateNext = db()->prepare('UPDATE shipment_nodes SET deadline_utc = ?, remaining_minutes = ?, sla_status = ?, updated_at = datetime("now") WHERE id = ?');
+        $updateNext->execute([$deadline->format('Y-m-d H:i:s'), $remaining, $status, $nextNode['id']]);
+        record_shipment_event((int) $node['shipment_id'], (int) $nextNode['id'], 'SLA_RECALCULATED', [
+            'trigger' => $nodeId,
+            'deadline' => $deadline->format('Y-m-d H:i:s'),
+            'remaining' => $remaining,
+            'status' => $status,
+        ]);
+    }
 }

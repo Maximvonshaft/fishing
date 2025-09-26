@@ -7,13 +7,13 @@ $nodes = $detail['nodes'];
         <nav class="text-xs text-slate-400 flex items-center gap-1">
             <a href="<?= route('projects.index') ?>" class="hover:text-brand">国家</a>
             <span>/</span>
-            <a href="<?= route('shipments.index', ['country' => $shipment['country']]) ?>" class="hover:text-brand">批次</a>
+            <a href="<?= route('shipments.index', ['country' => $shipment['country_code']]) ?>" class="hover:text-brand">批次</a>
             <span>/</span>
             <span class="text-slate-500"><?= htmlspecialchars($shipment['code']) ?></span>
         </nav>
         <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div>
-                <div class="text-sm text-slate-500">国家 <?= htmlspecialchars($shipment['country']) ?></div>
+                <div class="text-sm text-slate-500">国家 <?= htmlspecialchars($shipment['country_name'] ?? $shipment['country_code']) ?></div>
                 <h1 class="text-2xl font-semibold text-slate-900 mt-1">批次 <?= htmlspecialchars($shipment['code']) ?></h1>
             </div>
             <div class="text-sm text-slate-500">
@@ -40,7 +40,7 @@ $nodes = $detail['nodes'];
                                 <?php endif; ?>
                             </div>
                         </div>
-                        <div class="flex items-center gap-2 text-xs">
+                        <div class="flex flex-wrap items-center gap-2 text-xs">
                             <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-slate-200 text-slate-600">
                                 状态：<?= htmlspecialchars($node['status']) ?>
                             </span>
@@ -53,6 +53,22 @@ $nodes = $detail['nodes'];
                                 <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-slate-200 text-slate-600">
                                     账号：<?= htmlspecialchars($node['assignee_name']) ?>
                                 </span>
+                            <?php endif; ?>
+                            <?php if (isset($node['base_type'])): ?>
+                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-slate-200 text-slate-600">
+                                    起算：<?= htmlspecialchars(strtoupper($node['base_type'])) ?>
+                                </span>
+                            <?php endif; ?>
+                            <?php if (isset($node['sla_hours'])): ?>
+                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-slate-200 text-slate-600">
+                                    时效：<?= htmlspecialchars((string) $node['sla_hours']) ?>h
+                                </span>
+                            <?php endif; ?>
+                            <?php if (!empty($node['evidence_required'])): ?>
+                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-amber-200 text-amber-600">证据必传</span>
+                            <?php endif; ?>
+                            <?php if (!empty($node['signature_required'])): ?>
+                                <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-emerald-200 text-emerald-600">签名必需</span>
                             <?php endif; ?>
                         </div>
                     </div>

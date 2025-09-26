@@ -30,6 +30,46 @@ try {
             $user = api_require_login();
             json_response(['user' => format_user_for_api($user)]);
             break;
+        case 'countries.list':
+            api_require_role(['admin']);
+            json_response(list_countries_summary());
+            break;
+        case 'countries.create':
+            api_require_role(['admin']);
+            require_api_csrf();
+            try {
+                $id = create_country($payload['code'] ?? '', $payload['name'] ?? '');
+                json_response(['id' => $id], 201);
+            } catch (RuntimeException $e) {
+                error_response('VALIDATION_ERROR', $e->getMessage());
+            }
+            break;
+        case 'country.nodes':
+            api_require_role(['admin']);
+            $countryId = isset($_GET['country_id']) ? (int) $_GET['country_id'] : (int) ($payload['country_id'] ?? 0);
+            if ($countryId <= 0) {
+                error_response('VALIDATION_ERROR', 'country_id 必须提供');
+                break;
+            }
+            $nodes = get_country_nodes($countryId);
+            json_response($nodes);
+            break;
+        case 'country.nodes.save':
+            api_require_role(['admin']);
+            require_api_csrf();
+            $countryId = (int) ($payload['country_id'] ?? 0);
+            $nodes = $payload['nodes'] ?? [];
+            if (!is_array($nodes)) {
+                error_response('VALIDATION_ERROR', 'nodes 格式错误');
+                break;
+            }
+            try {
+                save_country_nodes($countryId, $nodes);
+                json_response(['status' => 'ok']);
+            } catch (RuntimeException $e) {
+                error_response('VALIDATION_ERROR', $e->getMessage());
+            }
+            break;
         case 'vendors.list':
             $user = api_require_role(['admin']);
             $vendors = db()->query('SELECT id, name, active FROM vendors ORDER BY name')->fetchAll();
@@ -140,6 +180,36 @@ try {
             $stmt->execute([$active, $targetId]);
             add_audit_event($user['id'], $targetId, 'USER_TOGGLED', ['active' => $active]);
             json_response(['status' => 'ok']);
+            break;
+        case 'shipments.create':
+            $user = api_require_role(['admin']);
+            require_api_csrf();
+            try {
+                $shipmentId = create_shipment($payload, $user['id']);
+                json_response(['id' => $shipmentId], 201);
+            } catch (RuntimeException $e) {
+                error_response('VALIDATION_ERROR', $e->getMessage());
+            }
+            break;
+        case 'shipments.list':
+            api_require_role(['admin']);
+            $filters = [
+                'status' => $_GET['status'] ?? null,
+                'q' => $_GET['q'] ?? null,
+            ];
+            $countryCode = $_GET['country'] ?? null;
+            $shipments = get_shipments($countryCode, $filters);
+            json_response($shipments);
+            break;
+        case 'shipments.show':
+            $user = api_require_login();
+            $shipmentId = isset($_GET['id']) ? (int) $_GET['id'] : (int) ($payload['id'] ?? 0);
+            $detail = get_shipment_detail($shipmentId, $user);
+            if (!$detail) {
+                error_response('NOT_FOUND', '批次不存在', [], 404);
+                break;
+            }
+            json_response($detail);
             break;
         case 'users.update_profile':
             $user = api_require_login();
