@@ -1,0 +1,336 @@
+{
+  "country": "ALB",
+  "project_code": "ALB",
+  "version": "1.0.0",
+  "effective_from": "2024-06-01T00:00:00Z",
+  "description": "Albania air/land hybrid baseline template covering NOA through customs release.",
+  "milestones": [
+    {
+      "code": "NOA_ISSUED",
+      "name": "海关货仓下发 NOA",
+      "category": "regulatory",
+      "required_fields": [
+        "observed_time",
+        "document_number",
+        "warehouse_code"
+      ],
+      "field_rules": {
+        "document_number": {
+          "type": "string",
+          "pattern": "^[A-Z0-9-]{6,20}$",
+          "message": "NOA 编号需为 6-20 位大写字母/数字/连字符"
+        },
+        "warehouse_code": {
+          "type": "string",
+          "enum": ["TIA", "PRN", "POG"],
+          "message": "仅允许录入已备案仓库"
+        }
+      },
+      "evidence_requirements": [
+        {
+          "type": "pdf",
+          "label": "NOA 文件",
+          "required": true
+        }
+      ],
+      "signature": {
+        "required": true,
+        "roles": ["transit_agent"],
+        "method": "draw"
+      },
+      "assign": {
+        "vendor_hint": "transit_agent",
+        "default_role": "operator"
+      },
+      "sla": {
+        "start": {
+          "prefer": [
+            "observed_time",
+            "asserted_time"
+          ],
+          "fallback": [
+            "shipment.eta_dest_airport"
+          ]
+        },
+        "deadline_expr": "start + 24h",
+        "calendar": {
+          "timezone": "Europe/Tirane",
+          "mode": "24x7"
+        },
+        "grace_minutes": 15,
+        "warn_threshold_minutes": 720,
+        "explain": "NOA 下发后 24 小时内确认"
+      },
+      "depends_on": []
+    },
+    {
+      "code": "DELIVERY_WINDOW_CONFIRMED",
+      "name": "提货窗确认",
+      "category": "planning",
+      "required_fields": [
+        "observed_time",
+        "slot_start",
+        "slot_end",
+        "contact_person",
+        "contact_phone"
+      ],
+      "field_rules": {
+        "slot_start": {
+          "type": "datetime",
+          "after": "NOA_ISSUED.observed_time",
+          "message": "提货窗需在 NOA 下发之后"
+        },
+        "slot_end": {
+          "type": "datetime",
+          "after_field": "slot_start",
+          "message": "提货窗结束需晚于开始"
+        },
+        "contact_phone": {
+          "type": "string",
+          "pattern": "^\\+355[0-9]{8,9}$",
+          "message": "请填写以 +355 开头的阿尔巴尼亚电话"
+        }
+      },
+      "evidence_requirements": [
+        {
+          "type": "pdf",
+          "label": "仓库确认函",
+          "required": false
+        }
+      ],
+      "signature": {
+        "required": false,
+        "roles": []
+      },
+      "assign": {
+        "vendor_hint": "forwarder",
+        "default_role": "operator"
+      },
+      "sla": {
+        "start": {
+          "prefer": [
+            "NOA_ISSUED.observed_time"
+          ],
+          "fallback": [
+            "NOA_ISSUED.asserted_time"
+          ]
+        },
+        "deadline_expr": "start + 6h",
+        "calendar": {
+          "timezone": "Europe/Tirane",
+          "mode": "business_hours",
+          "business_hours": {
+            "weekdays": [1, 2, 3, 4, 5],
+            "start": "08:00",
+            "end": "18:00"
+          },
+          "holidays": [
+            "2024-06-17",
+            "2024-11-28"
+          ]
+        },
+        "grace_minutes": 30,
+        "warn_threshold_minutes": 120,
+        "stop_clock": [
+          {
+            "condition": "assignment.recalled",
+            "reason": "待重新指派"
+          }
+        ],
+        "explain": "NOA 后 6 小时内确认提货窗口"
+      },
+      "depends_on": [
+        "NOA_ISSUED"
+      ]
+    },
+    {
+      "code": "BBL_HANDOVER_DONE",
+      "name": "BBL 交接完成提货",
+      "category": "execution",
+      "required_fields": [
+        "observed_time",
+        "handover_location",
+        "handover_person",
+        "vehicle_plate"
+      ],
+      "field_rules": {
+        "handover_location": {
+          "type": "string",
+          "max_length": 120
+        },
+        "vehicle_plate": {
+          "type": "string",
+          "pattern": "^[A-Z]{2}-[0-9]{3,4}-[A-Z]{1,2}$",
+          "message": "按阿尔巴尼亚车牌格式录入"
+        }
+      },
+      "evidence_requirements": [
+        {
+          "type": "pdf",
+          "label": "货物交接单",
+          "required": true
+        },
+        {
+          "type": "jpg",
+          "label": "现场照片",
+          "required": true,
+          "geo_radius_m": 200
+        }
+      ],
+      "signature": {
+        "required": true,
+        "roles": ["BBL_staff"],
+        "method": "pin"
+      },
+      "assign": {
+        "vendor_hint": "last_mile",
+        "default_role": "operator"
+      },
+      "sla": {
+        "start": {
+          "prefer": [
+            "NOA_ISSUED.observed_time"
+          ],
+          "fallback": [
+            "NOA_ISSUED.asserted_time"
+          ]
+        },
+        "deadline_expr": "start + 12h",
+        "calendar": {
+          "timezone": "Europe/Tirane",
+          "mode": "24x7"
+        },
+        "grace_minutes": 10,
+        "warn_threshold_minutes": 120,
+        "explain": "NOA 后 12 小时完成提货交接"
+      },
+      "depends_on": [
+        "DELIVERY_WINDOW_CONFIRMED"
+      ]
+    },
+    {
+      "code": "VORE_INBOUND_REGULATED",
+      "name": "Vore 监管入场登记",
+      "category": "regulatory",
+      "required_fields": [
+        "observed_time",
+        "gate_reference",
+        "customs_officer"
+      ],
+      "field_rules": {
+        "gate_reference": {
+          "type": "string",
+          "pattern": "^VORE-[0-9]{5}$",
+          "message": "按 VORE-00000 格式填写"
+        }
+      },
+      "evidence_requirements": [
+        {
+          "type": "pdf",
+          "label": "监管入场单",
+          "required": true
+        }
+      ],
+      "signature": {
+        "required": true,
+        "roles": ["customs_broker"],
+        "method": "draw"
+      },
+      "assign": {
+        "vendor_hint": "customs_broker",
+        "default_role": "operator"
+      },
+      "sla": {
+        "start": {
+          "prefer": [
+            "BBL_HANDOVER_DONE.observed_time"
+          ],
+          "fallback": [
+            "shipment.etd"
+          ]
+        },
+        "deadline_expr": "start + 8h",
+        "calendar": {
+          "timezone": "Europe/Tirane",
+          "mode": "business_hours",
+          "business_hours": {
+            "weekdays": [1, 2, 3, 4, 5],
+            "start": "07:00",
+            "end": "19:00"
+          }
+        },
+        "grace_minutes": 20,
+        "warn_threshold_minutes": 90,
+        "explain": "提货交接后 8 小时内完成监管入场"
+      },
+      "depends_on": [
+        "BBL_HANDOVER_DONE"
+      ]
+    },
+    {
+      "code": "CUSTOMS_CLEARANCE_STARTED",
+      "name": "清关开始",
+      "category": "regulatory",
+      "required_fields": [
+        "observed_time",
+        "declaration_number",
+        "customs_channel"
+      ],
+      "field_rules": {
+        "declaration_number": {
+          "type": "string",
+          "pattern": "^[0-9]{6}/[0-9]{2}$",
+          "message": "报关单号格式如 123456/24"
+        },
+        "customs_channel": {
+          "type": "string",
+          "enum": ["green", "yellow", "red"],
+          "message": "限定海关通道：green/yellow/red"
+        }
+      },
+      "evidence_requirements": [
+        {
+          "type": "pdf",
+          "label": "报关受理凭证",
+          "required": true
+        }
+      ],
+      "signature": {
+        "required": true,
+        "roles": ["customs_broker"],
+        "method": "pin"
+      },
+      "assign": {
+        "vendor_hint": "customs_broker",
+        "default_role": "approver"
+      },
+      "sla": {
+        "start": {
+          "prefer": [
+            "VORE_INBOUND_REGULATED.observed_time"
+          ],
+          "fallback": [
+            "VORE_INBOUND_REGULATED.asserted_time"
+          ]
+        },
+        "deadline_expr": "max(VORE_INBOUND_REGULATED.observed_time, shipment.eta_dest_airport) + 6h",
+        "calendar": {
+          "timezone": "Europe/Tirane",
+          "mode": "24x7"
+        },
+        "grace_minutes": 30,
+        "warn_threshold_minutes": 90,
+        "stop_clock": [
+          {
+            "condition": "customs_channel == 'red'",
+            "reason": "红通道人工检查停表"
+          }
+        ],
+        "explain": "监管入场或到港后 6 小时内启动清关"
+      },
+      "depends_on": [
+        "VORE_INBOUND_REGULATED"
+      ]
+    }
+  ]
+}
