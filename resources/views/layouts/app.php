@@ -18,43 +18,47 @@
             }
         }
     </script>
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen">
+<?php
+$navItems = [];
+if (($user['role'] ?? null) === 'admin') {
+    $navItems = [
+        ['label' => '国家', 'route' => 'projects.index', 'icon' => '🌍'],
+        ['label' => '批次', 'route' => 'shipments.index', 'icon' => '📦'],
+        ['label' => '供应商', 'route' => 'vendors.manage', 'icon' => '🏢'],
+        ['label' => '用户', 'route' => 'users.manage', 'icon' => '👤'],
+        ['label' => '待办', 'route' => 'tasks.index', 'icon' => '✅'],
+        ['label' => '系统设置', 'route' => 'settings.index', 'icon' => '⚙️'],
+    ];
+} else {
+    $navItems = [
+        ['label' => '我的待办', 'route' => 'tasks.index', 'icon' => '✅'],
+        ['label' => '个人资料', 'route' => 'settings.index', 'icon' => '⚙️'],
+    ];
+}
+$current = $_GET['page'] ?? 'projects';
+$map = [
+    'projects' => 'projects.index',
+    'shipments' => 'shipments.index',
+    'shipment-detail' => 'shipments.index',
+    'tasks' => 'tasks.index',
+    'settings' => 'settings.index',
+    'vendors' => 'vendors.manage',
+    'users' => 'users.manage',
+];
+$currentRoute = $map[$current] ?? 'projects.index';
+?>
 <div class="flex min-h-screen">
     <div class="hidden lg:flex lg:flex-col lg:w-64 bg-white border-r border-slate-200">
         <div class="h-16 flex items-center px-6 border-b border-slate-200">
             <span class="text-lg font-semibold text-brand">Logistics SLA</span>
         </div>
         <nav class="flex-1 overflow-y-auto py-6 space-y-1 px-4 text-sm">
-            <?php
-            $navItems = [];
-            if (($user['role'] ?? null) === 'admin') {
-                $navItems = [
-                    ['label' => '国家', 'route' => 'projects.index', 'icon' => '🌍'],
-                    ['label' => '批次', 'route' => 'shipments.index', 'icon' => '📦'],
-                    ['label' => '供应商', 'route' => 'vendors.manage', 'icon' => '🏢'],
-                    ['label' => '用户', 'route' => 'users.manage', 'icon' => '👤'],
-                    ['label' => '待办', 'route' => 'tasks.index', 'icon' => '✅'],
-                    ['label' => '系统设置', 'route' => 'settings.index', 'icon' => '⚙️'],
-                ];
-            } else {
-                $navItems = [
-                    ['label' => '我的待办', 'route' => 'tasks.index', 'icon' => '✅'],
-                    ['label' => '个人资料', 'route' => 'settings.index', 'icon' => '⚙️'],
-                ];
-            }
-            $current = $_GET['page'] ?? 'projects';
-            $map = [
-                'projects' => 'projects.index',
-                'shipments' => 'shipments.index',
-                'shipment-detail' => 'shipments.index',
-                'tasks' => 'tasks.index',
-                'settings' => 'settings.index',
-                'vendors' => 'vendors.manage',
-                'users' => 'users.manage',
-            ];
-            $currentRoute = $map[$current] ?? 'projects.index';
-            foreach ($navItems as $item):
+            <?php foreach ($navItems as $item):
                 $active = $item['route'] === $currentRoute;
             ?>
             <a href="<?= route($item['route']) ?>"
@@ -67,6 +71,35 @@
         <div class="p-4 border-t border-slate-200 text-xs text-slate-500">
             <div>Europe/Tirane</div>
             <div><?= date('Y-m-d H:i') ?></div>
+        </div>
+    </div>
+
+    <div x-cloak x-show="sidebarOpen" class="fixed inset-0 z-40 flex lg:hidden">
+        <div class="fixed inset-0 bg-slate-900/50" @click="sidebarOpen = false" x-transition.opacity></div>
+        <div class="relative ml-auto flex h-full w-72 max-w-full flex-col bg-white shadow-xl"
+             x-transition:enter="transition ease-out duration-150" x-transition:enter-start="translate-x-full"
+             x-transition:enter-end="translate-x-0" x-transition:leave="transition ease-in duration-100"
+             x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full">
+            <div class="h-16 flex items-center justify-between px-6 border-b border-slate-200">
+                <span class="text-lg font-semibold text-brand">导航</span>
+                <button class="inline-flex items-center justify-center w-10 h-10 rounded-lg border border-slate-200"
+                        @click="sidebarOpen = false">✕</button>
+            </div>
+            <nav class="flex-1 overflow-y-auto py-6 space-y-1 px-4 text-sm">
+                <?php foreach ($navItems as $item):
+                    $active = $item['route'] === $currentRoute;
+                ?>
+                <a href="<?= route($item['route']) ?>" @click="sidebarOpen = false"
+                   class="flex items-center gap-3 px-3 py-2 rounded-lg border <?php if ($active): ?>bg-brand/10 border-brand text-brand font-semibold<?php else: ?>border-transparent hover:border-brand/40 hover:bg-brand/5<?php endif; ?>">
+                    <span><?= $item['icon'] ?></span>
+                    <span><?= htmlspecialchars($item['label']) ?></span>
+                </a>
+                <?php endforeach; ?>
+            </nav>
+            <div class="p-4 border-t border-slate-200 text-xs text-slate-500">
+                <div class="font-semibold text-slate-900"><?= htmlspecialchars($user['display_name'] ?? '') ?></div>
+                <div><?= date('Y-m-d H:i') ?></div>
+            </div>
         </div>
     </div>
 
